@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const listChannelPairingRequests = vi.fn();
 const approveChannelPairingCode = vi.fn();
@@ -39,7 +39,11 @@ vi.mock("../config/config.js", () => ({
 }));
 
 describe("pairing cli", () => {
-  it("evaluates pairing channels when registering the CLI (not at import)", async () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("evaluates pairing channels when executing a command", async () => {
     listPairingChannels.mockClear();
 
     const { registerPairingCli } = await import("./pairing-cli.js");
@@ -48,6 +52,11 @@ describe("pairing cli", () => {
     const program = new Command();
     program.name("test");
     registerPairingCli(program);
+
+    expect(listPairingChannels).not.toHaveBeenCalled();
+
+    listChannelPairingRequests.mockResolvedValueOnce([]);
+    await program.parseAsync(["pairing", "list", "telegram"], { from: "user" });
 
     expect(listPairingChannels).toHaveBeenCalledTimes(1);
   });

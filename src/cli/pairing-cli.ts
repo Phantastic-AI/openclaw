@@ -40,29 +40,36 @@ function parseChannel(raw: unknown, channels: PairingChannel[]): PairingChannel 
   throw new Error(`Invalid channel: ${value}`);
 }
 
+function renderPairingChannelsHelp() {
+  const channels = listPairingChannels();
+  const list = channels.length > 0 ? channels.join(", ") : "none registered";
+  return `${theme.muted("Channels:")} ${list}`;
+}
+
 async function notifyApproved(channel: PairingChannel, id: string) {
   const cfg = loadConfig();
   await notifyPairingApproved({ channelId: channel, id, cfg });
 }
 
 export function registerPairingCli(program: Command) {
-  const channels = listPairingChannels();
   const pairing = program
     .command("pairing")
     .description("Secure DM pairing (approve inbound requests)")
     .addHelpText(
       "after",
       () =>
-        `\n${theme.muted("Docs:")} ${formatDocsLink("/cli/pairing", "docs.clawd.bot/cli/pairing")}\n`,
+        `\n${renderPairingChannelsHelp()}\n${theme.muted("Docs:")} ${formatDocsLink("/cli/pairing", "docs.clawd.bot/cli/pairing")}\n`,
     );
 
   pairing
     .command("list")
     .description("List pending pairing requests")
-    .option("--channel <channel>", `Channel (${channels.join(", ")})`)
-    .argument("[channel]", `Channel (${channels.join(", ")})`)
+    .addHelpText("after", () => `\n${renderPairingChannelsHelp()}\n`)
+    .option("--channel <channel>", "Channel")
+    .argument("[channel]", "Channel")
     .option("--json", "Print JSON", false)
     .action(async (channelArg, opts) => {
+      const channels = listPairingChannels();
       const channelRaw = opts.channel ?? channelArg;
       if (!channelRaw) {
         throw new Error(
@@ -106,11 +113,13 @@ export function registerPairingCli(program: Command) {
   pairing
     .command("approve")
     .description("Approve a pairing code and allow that sender")
-    .option("--channel <channel>", `Channel (${channels.join(", ")})`)
+    .addHelpText("after", () => `\n${renderPairingChannelsHelp()}\n`)
+    .option("--channel <channel>", "Channel")
     .argument("<codeOrChannel>", "Pairing code (or channel when using 2 args)")
     .argument("[code]", "Pairing code (when channel is passed as the 1st arg)")
     .option("--notify", "Notify the requester on the same channel", false)
     .action(async (codeOrChannel, code, opts) => {
+      const channels = listPairingChannels();
       const channelRaw = opts.channel ?? codeOrChannel;
       const resolvedCode = opts.channel ? codeOrChannel : code;
       if (!opts.channel && !code) {
