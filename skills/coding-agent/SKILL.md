@@ -276,3 +276,16 @@ This triggers an immediate wake event — Skippy gets pinged in seconds, not 10 
 - **exec is your friend:** `codex exec "prompt"` runs and exits cleanly - perfect for one-shots.
 - **submit vs write:** Use `submit` to send input + Enter, `write` for raw data without newline.
 - **Sass works:** Codex responds well to playful prompts. Asked it to write a haiku about being second fiddle to a space lobster, got: *"Second chair, I code / Space lobster sets the tempo / Keys glow, I follow"* 🦞
+
+---
+
+## Advanced: Codex Session Management & Debugging
+
+For session resume, forensics (reading session logs), timeout management, and execution modes: see [references/codex-advanced.md](references/codex-advanced.md).
+
+Key highlights:
+- **Resume sessions**: `codex exec resume <SESSION_ID> "Continue..."`
+- **Sessions stored**: `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
+- **YOLO mode**: `--dangerously-bypass-approvals-and-sandbox` for full network/filesystem
+- **Timeout rule**: Set to expected duration + 50% buffer
+- **When killed**: Check session log FIRST, then resume if possible
