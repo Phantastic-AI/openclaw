@@ -218,16 +218,17 @@ git worktree remove /tmp/issue-99
 ## ⚠️ Rules
 
 1. **Always use pty:true** - coding agents need a terminal!
-2. **Respect tool choice** - if user asks for Codex, use Codex.
+2. **Default timeout: 5 hours (18000 seconds)** - Codex rarely missteps with a solid exec plan. Spot-check progress rather than killing prematurely.
+3. **Respect tool choice** - if user asks for Codex, use Codex.
    - Orchestrator mode: do NOT hand-code patches yourself.
    - If an agent fails/hangs, respawn it or ask the user for direction, but don't silently take over.
-3. **Be patient** - don't kill sessions because they're "slow"
-4. **Monitor with process:log** - check progress without interfering
-5. **--full-auto for building** - auto-approves changes
-6. **vanilla for reviewing** - no special flags needed
-7. **Parallel is OK** - run many Codex processes at once for batch work
-8. **NEVER start Codex in ~/clawd/** - it'll read your soul docs and get weird ideas about the org chart!
-9. **NEVER checkout branches in ~/Projects/clawdbot/** - that's the LIVE Clawdbot instance!
+4. **Be patient** - don't kill sessions because they're "slow"
+5. **Monitor with process:log** - check progress without interfering
+6. **--full-auto for building** - auto-approves changes
+7. **vanilla for reviewing** - no special flags needed
+8. **Parallel is OK** - run many Codex processes at once for batch work
+9. **NEVER start Codex in ~/clawd/** - it'll read your soul docs and get weird ideas about the org chart!
+10. **NEVER checkout branches in ~/Projects/clawdbot/** - that's the LIVE Clawdbot instance!
 
 ---
 
