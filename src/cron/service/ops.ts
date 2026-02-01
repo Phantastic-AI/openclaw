@@ -39,6 +39,18 @@ export function stop(state: CronServiceState) {
 }
 
 export async function status(state: CronServiceState) {
+  // T154 fix: Non-blocking read from cache if available
+  // This prevents timeouts when jobs are executing (holding the lock)
+  if (state.store) {
+    return {
+      enabled: state.deps.cronEnabled,
+      storePath: state.deps.storePath,
+      jobs: state.store.jobs.length,
+      nextWakeAtMs: state.deps.cronEnabled === true ? (nextWakeAtMs(state) ?? null) : null,
+    };
+  }
+
+  // Fall back to locked load only on cold cache
   return await locked(state, async () => {
     await ensureLoaded(state);
     return {
@@ -51,6 +63,15 @@ export async function status(state: CronServiceState) {
 }
 
 export async function list(state: CronServiceState, opts?: { includeDisabled?: boolean }) {
+  // T154 fix: Non-blocking read from cache if available
+  // This prevents timeouts when jobs are executing (holding the lock)
+  if (state.store) {
+    const includeDisabled = opts?.includeDisabled === true;
+    const jobs = state.store.jobs.filter((j) => includeDisabled || j.enabled);
+    return jobs.sort((a, b) => (a.state.nextRunAtMs ?? 0) - (b.state.nextRunAtMs ?? 0));
+  }
+
+  // Fall back to locked load only on cold cache
   return await locked(state, async () => {
     await ensureLoaded(state);
     const includeDisabled = opts?.includeDisabled === true;
