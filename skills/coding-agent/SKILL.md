@@ -102,16 +102,17 @@ process action:kill sessionId:XXX
 | Flag | Effect |
 |------|--------|
 | `exec "prompt"` | One-shot execution, exits when done |
-| `--full-auto` | Sandboxed but auto-approves in workspace |
-| `--yolo` | NO sandbox, NO approvals (fastest, most dangerous) |
+| `--full-auto` | Convenience alias for low-friction sandboxed automatic execution (`-a on-request`, `--sandbox workspace-write`) |
+| `--dangerously-bypass-approvals-and-sandbox` | **YOLO mode** — skip approvals and run **without sandboxing** (fastest, most dangerous) |
+| `--yolo` | **YOLO shortcut (works on this host even though it’s not shown in `--help`)**. Verified by running `codex --yolo exec ...` and observing `sandbox: danger-full-access`. Prefer the explicit flag above when writing docs. |
 
 ### Building/Creating
 ```bash
 # Quick one-shot (auto-approves) - remember PTY!
 bash pty:true workdir:~/project command:"codex exec --full-auto 'Build a dark mode toggle'"
 
-# Background for longer work
-bash pty:true workdir:~/project background:true command:"codex --yolo 'Refactor the auth module'"
+# Background for longer work (YOLO)
+bash pty:true workdir:~/project background:true command:"codex --dangerously-bypass-approvals-and-sandbox 'Refactor the auth module'"
 ```
 
 ### Reviewing PRs
@@ -197,8 +198,8 @@ git worktree add -b fix/issue-78 /tmp/issue-78 main
 git worktree add -b fix/issue-99 /tmp/issue-99 main
 
 # 2. Launch Codex in each (background + PTY!)
-bash pty:true workdir:/tmp/issue-78 background:true command:"pnpm install && codex --yolo 'Fix issue #78: <description>. Commit and push.'"
-bash pty:true workdir:/tmp/issue-99 background:true command:"pnpm install && codex --yolo 'Fix issue #99: <description>. Commit and push.'"
+bash pty:true workdir:/tmp/issue-78 background:true command:"pnpm install && codex --dangerously-bypass-approvals-and-sandbox 'Fix issue #78: <description>. Commit and push.'"
+bash pty:true workdir:/tmp/issue-99 background:true command:"pnpm install && codex --dangerously-bypass-approvals-and-sandbox 'Fix issue #99: <description>. Commit and push.'"
 
 # 3. Monitor progress
 process action:list
@@ -218,12 +219,16 @@ git worktree remove /tmp/issue-99
 ## ⚠️ Rules
 
 1. **Always use pty:true** - coding agents need a terminal!
-2. **Default timeout: 5 hours (18000 seconds)** - Codex rarely missteps with a solid exec plan. Spot-check progress rather than killing prematurely.
+2. **Timeouts:** Set to expected duration + 50% buffer (don’t guess a round number). If you can’t estimate, default to **2 hours minimum** and monitor via `process log`.
 3. **Respect tool choice** - if user asks for Codex, use Codex.
    - Orchestrator mode: do NOT hand-code patches yourself.
    - If an agent fails/hangs, respawn it or ask the user for direction, but don't silently take over.
 4. **Be patient** - don't kill sessions because they're "slow"
-5. **Monitor with process:log** - check progress without interfering
+5. **If Codex looks stuck (no output):** treat it as recoverable.
+   - Check in every **3–10 minutes** with `process log`.
+   - Inspect the latest `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`.
+   - Recover by resuming: `codex exec resume <SESSION_ID> "continue and print output"`.
+6. **Monitor with process:log** - check progress without interfering
 6. **--full-auto for building** - auto-approves changes
 7. **vanilla for reviewing** - no special flags needed
 8. **Parallel is OK** - run many Codex processes at once for batch work
@@ -261,12 +266,26 @@ clawdbot gateway wake --text "Done: [brief summary of what was built]" --mode no
 
 **Example:**
 ```bash
-bash pty:true workdir:~/project background:true command:"codex --yolo exec 'Build a REST API for todos.
+bash pty:true workdir:~/project background:true command:"codex --dangerously-bypass-approvals-and-sandbox exec 'Build a REST API for todos.
 
 When completely finished, run: clawdbot gateway wake --text \"Done: Built todos REST API with CRUD endpoints\" --mode now'"
 ```
 
 This triggers an immediate wake event — Skippy gets pinged in seconds, not 10 minutes.
+
+---
+
+## Subagents: naming + true YOLO
+
+If you spawn a **sub-agent** whose whole job is to run Codex in YOLO mode, name the session/label like:
+
+- `codex-yolo-<short-task>`
+
+…and make sure the Codex command includes the actual YOLO flag:
+
+- `--dangerously-bypass-approvals-and-sandbox`
+
+This makes it obvious in `sessions_list` / logs which runs are unsafe-by-design.
 
 ---
 
@@ -287,6 +306,7 @@ For session resume, forensics (reading session logs), timeout management, and ex
 Key highlights:
 - **Resume sessions**: `codex exec resume <SESSION_ID> "Continue..."`
 - **Sessions stored**: `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
-- **YOLO mode**: `--dangerously-bypass-approvals-and-sandbox` for full network/filesystem
+- **YOLO mode (explicit)**: `--dangerously-bypass-approvals-and-sandbox`
+- **YOLO mode (shortcut)**: `--yolo` (works on this host even though it’s not shown in `--help`; verified that `codex --yolo exec ...` results in `sandbox: danger-full-access`).
 - **Timeout rule**: Set to expected duration + 50% buffer
 - **When killed**: Check session log FIRST, then resume if possible

@@ -1,6 +1,6 @@
 ---
 name: research-experiment
-description: Run end-to-end scientific research experiments using Denario and HAL's toolchain. Trigger when the user wants to analyze a codebase/dataset, generate a research paper, run a scientific experiment, or produce an academic PDF. Covers topic selection, Denario pipeline (idea → methods → results → paper), Codex review, LaTeX compilation, and distribution.
+description: Run end-to-end scientific research experiments using Denario and HAL's toolchain. Trigger when the user wants to analyze a codebase/dataset, run experiments/benchmarks, or write up results. Default output is a short **research brief**; optionally expand into an academic PDF/paper. Covers topic selection, Denario pipeline (idea → methods → results → brief/paper), Codex review, LaTeX compilation, and distribution.
 ---
 
 # Research Experiment Workflow
@@ -10,8 +10,26 @@ Run scientific research experiments using Denario's multi-agent pipeline with HA
 ## Prerequisites
 
 - Denario installed at `/home/debian/clawd/home/Workspace/Denario`
-- API keys in `/home/debian/clawd/home/Workspace/Denario/.env` (OPENAI, GOOGLE, ANTHROPIC)
-- XeLaTeX: `sudo apt install texlive-xetex texlive-publishers` (for APS/Nature paper formats)
+- API keys in `/home/debian/clawd/home/Workspace/Denario/.env`:
+  - `OPENAI_API_KEY` — GPT-5.2 (orchestrator/engineer/critic)
+  - `GEMINI_API_KEY` — Gemini 3.0 Pro (planner/proposals). **Must be AI Studio key, not Vertex.**
+  - `ANTHROPIC_API_KEY` — Claude (optional)
+  - `PERPLEXITY_API_KEY` — for citation insertion (optional)
+- XeLaTeX: `sudo apt install texlive-xetex texlive-publishers texlive-science`
+- Denario import takes ~22s cold start — this is normal, not a hang
+
+## Modes
+
+### Mode 1: Denario Pipeline (multi-agent debate)
+Uses GPT-5.2 + Gemini 3.0 Pro in adversarial maker/hater loops.
+Best for: structured research questions with clear methodology.
+
+### Mode 2: Claude Direct (solo + critic)
+Claude subagent runs experiments directly, writes LaTeX.
+Spawn Codex (xhigh) as critic at key junctures.
+Best for: benchmarks, landscape comparisons, empirical work.
+
+**⚠️ NEVER present outputs from different modes as comparable.** If one mode fails partially, report it as failed — don't substitute data from another source.
 
 ## Quick Start
 
@@ -26,8 +44,18 @@ den.set_data_description("...")  # Step 1
 den.get_idea()                    # Step 2
 den.get_method()                  # Step 3
 den.get_results()                 # Step 4
-den.get_paper(journal=Journal.APS) # Step 5
+den.get_paper(journal=Journal.APS)  # Optional: full paper/PDF
 ```
+
+## Output format
+
+### Default: Research Brief (canonical)
+A **Research Brief** is the default output: a short write-up meant for internal decision-making (≈1–3 pages, Markdown is fine). It should include: goal, dataset, evaluation protocol, key numbers, caveats (esp. comparability), and a clear recommendation.
+
+**Workflow invariant:** if a Codex-critic run is started, do not handwave “it hung.” Instead: check progress every **3–10 minutes**, and if it stalls, inspect `~/.codex/sessions/.../rollout-*.jsonl` and resume with `codex exec resume <SESSION_ID> "continue"` to recover output.
+
+### Optional: Full paper/PDF
+Only produce a full paper when explicitly requested.
 
 ## End-to-End Workflow
 
@@ -60,26 +88,59 @@ Each step runs a multi-agent system (control + engineer agents, maker/hater adve
 ```python
 den = Denario(project_dir="/home/debian/clawd/home/Workspace/Denario/projects/<name>")
 den.set_data_description(open("data_description.md").read())
-den.get_idea()    # ~90s, adversarial refinement
-den.get_method()  # Generates full methodology
-den.get_results() # ⚠️ Tries to EXECUTE experiments — see caveats
+den.get_idea()    # ~10-20s, adversarial refinement (4 maker/hater rounds)
+den.get_method()  # ~10-15s, generates methodology
+den.get_results() # ⚠️ Tries to EXECUTE experiments — needs working API keys
 den.get_paper(journal=Journal.APS)
 ```
 
 Run in background sessions — each step can take 2-15 minutes.
 
-### 4. Known Issues & Workarounds
+### 4. Pipeline Integrity Rules
+
+**CRITICAL — read before running:**
+
+1. **If any pipeline step fails, the experiment is INCOMPLETE.** Report it as such. Never:
+   - Manually copy results from another experiment into `results.md`
+   - Present a paper with substituted data as a "Denario paper"
+   - Compare a partially-failed pipeline's output with a fully-successful one
+2. **If `get_results()` fails:** Fix the root cause (credentials, hardware, deps) and re-run. Do NOT work around it.
+3. **If comparing two approaches (e.g., Denario vs Claude):** Both must produce results independently. If one fails, say "X failed, re-running" — don't present garbage.
+
+### 5. Claude Direct Mode (with Critic)
+
+For benchmarks and empirical work, skip Denario and run directly:
+
+```
+1. Claude subagent writes benchmark script
+2. Runs all experiments, collects real numbers
+3. → CHECKPOINT: Spawn Codex (xhigh) as critic
+   - "Review this methodology. What's wrong? What's missing?"
+   - Incorporate feedback
+4. Claude writes LaTeX paper
+5. → CHECKPOINT: Spawn Codex (xhigh) as reviewer
+   - "Review this paper for weaknesses, overclaims, missing caveats"
+   - Incorporate feedback
+6. Compile + distribute
+```
+
+Critic junctures prevent single-perspective blind spots.
+
+### 6. Known Issues & Workarounds
 
 | Issue | Workaround |
 |-------|-----------|
-| `get_results()` needs specific hardware (GPU, M4, etc.) | Write `results.md` manually or use synthetic data |
+| `get_results()` fails with Google Cloud auth | Use `GEMINI_API_KEY` (AI Studio), not Vertex. Check `.env` has the alias. |
+| `get_results()` needs specific hardware (GPU, M4, etc.) | ❌ Don't fake results. Either fix hardware access or report as blocked. |
 | `python` not found (only `python3`) | `sudo ln -s /usr/bin/python3 /usr/local/bin/python` |
 | File path errors in cmbagent executor | Copy source files into Denario's project `input_files/` dir |
 | OOM on paper generation | Run `get_paper()` separately after killing other processes |
 | Missing LaTeX packages | `sudo apt install texlive-xetex texlive-publishers texlive-science` |
 | Missing `revtex4-2` class | `sudo apt install texlive-publishers` |
+| Perplexity citation API returns empty | Citations are optional — paper still valid without them |
+| Import takes 22s | Normal. Set subagent timeout to 2400s+ |
 
-### 5. Manual Assembly Fallback
+### 7. Manual Assembly Fallback
 
 If `get_paper()` fails or produces partial output, assemble manually:
 
@@ -94,7 +155,7 @@ If `get_paper()` fails or produces partial output, assemble manually:
 
 Compile: `xelatex assembled_draft.tex`
 
-### 6. Review
+### 8. Review
 
 Have Codex review the output:
 ```bash
@@ -103,9 +164,10 @@ codex -c model=gpt-5.2-codex exec "Review this abstract for weaknesses: ..."
 
 Key review dimensions: clarity, methodology specificity, jargon definition, contribution type.
 
-### 7. Distribution
+### 9. Distribution
 
 - **CDN:** `sudo cp paper.pdf /var/www/cdn.phantastic.ai/<name>.pdf`
+- **Wiki trace:** Create Phriction page at `/traces/<date>-<slug>/` linking all artifacts
 - **Email:** Use `gog gmail send` with PDF attachment
 - **Channel:** Upload via Mattermost API (see TOOLS.md for file upload pattern)
 
@@ -117,12 +179,15 @@ Denario/projects/<name>/
 │   ├── data_description.md   # Your input
 │   ├── idea.md               # Generated
 │   ├── methods.md            # Generated
-│   ├── results.md            # Generated or manual
+│   ├── results.md            # Generated (MUST be from this pipeline, not copied)
 │   └── plots/                # Generated
-└── paper/
+├── brief/                    # Preferred: short research brief (Markdown)
+└── paper/                    # Optional: full paper/PDF
     ├── *.tex                 # Generated LaTeX
     └── *.pdf                 # Compiled paper
 ```
+
+If Denario only generates `paper/` outputs, you can still create `brief/brief.md` manually from `results.md` + key tables.
 
 ## Cost Estimates
 
@@ -136,8 +201,11 @@ Denario/projects/<name>/
 
 ## Lessons from Prior Experiments
 
-1. **Hardware matters** — `get_results()` executes real code. If your experiment needs specific hardware (GPU, Mac, etc.), either attach the right node via Tailscale or write results manually.
-2. **Scope tightly** — Pick the narrowest, most concrete angle from source material. "Language overloading" worked better than "all agentic coding techniques."
-3. **Copy source files** into the Denario project directory before running — the executor can't reliably resolve paths outside its working directory.
-4. **Run steps individually** rather than chaining — easier to debug and intervene.
-5. **Manual intervention is normal** — Denario gets you 70-80% of the way; expect to edit results and fix LaTeX.
+1. **Intellectual honesty over completeness** — A failed experiment honestly reported is more valuable than a franken-paper with substituted data. (Incident: 2026-01-28-apples-to-oranges)
+2. **Hardware matters** — `get_results()` executes real code. If your experiment needs specific hardware, either attach the right node or report as blocked.
+3. **Scope tightly** — Pick the narrowest, most concrete angle from source material.
+4. **Copy source files** into the Denario project directory before running — the executor can't reliably resolve paths outside its working directory.
+5. **Run steps individually** rather than chaining — easier to debug and intervene.
+6. **Manual intervention is normal** — Denario gets you 70-80% of the way; expect to edit results and fix LaTeX.
+7. **Always create a Phorge ticket** before starting an experiment — traceability matters.
+8. **Import cold start is 22s** — don't panic, don't set tight timeouts.
