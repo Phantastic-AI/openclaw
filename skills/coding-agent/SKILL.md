@@ -67,6 +67,34 @@ bash pty:true workdir:~/Projects/myproject command:"codex exec 'Add error handli
 
 ---
 
+## Repo Setup (Standard Agent Files)
+
+Before starting significant coding-agent work in a repo, scaffold the standard agent files with `setup-coding-agents`:
+
+```bash
+# In an existing repo (default template)
+setup-coding-agents
+
+# Explicit template + explicit target
+setup-coding-agents hal /path/to/repo
+```
+
+This will copy:
+
+- `AGENTS.md`
+- `.agents/template/PLAN.md`
+
+...and create symlinks:
+
+- `claude.md` -> `AGENTS.md`
+- `gemini` -> `AGENTS.md`
+
+Templates live at `/home/debian/clawd/home/Workspace/coding-agent-templates` (override with `CODING_AGENT_TEMPLATES_DIR`).
+
+Note: `setup-coding-agents` does **not** create a git repo. If you're in a scratch directory, you still need `git init` for Codex.
+
+---
+
 ## The Pattern: workdir + background + pty
 
 For longer tasks, use background mode with PTY:
