@@ -44,6 +44,8 @@ export type MattermostAccountConfig = {
   blockStreamingCoalesce?: BlockStreamingCoalesceConfig;
   /** Outbound response prefix override for this channel/account. */
   responsePrefix?: string;
+  /** Tool activity visibility mode: "off" (default), "persist", or "transient". */
+  toolActivity?: "off" | "persist" | "transient";
 };
 
 export type MattermostConfig = {

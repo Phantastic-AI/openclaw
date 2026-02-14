@@ -6,6 +6,19 @@ export type BlockReplyContext = {
   timeoutMs?: number;
 };
 
+/** Fired when a tool starts, updates, or ends execution. */
+export type ToolActivityEvent = {
+  phase: "start" | "update" | "end";
+  toolName: string;
+  toolCallId: string;
+  /** Human-readable summary (e.g. "📖 Read: src/foo.ts"). */
+  summary: string;
+  /** Tool arguments (only on start). */
+  args?: Record<string, unknown>;
+  /** Whether the tool ended in error (only on end). */
+  isError?: boolean;
+};
+
 /** Context passed to onModelSelected callback with actual model used. */
 export type ModelSelectedContext = {
   provider: string;
@@ -23,6 +36,9 @@ export type GetReplyOptions = {
   /** Notifies when an agent run actually starts (useful for webchat command handling). */
   onAgentRunStart?: (runId: string) => void;
   onReplyStart?: () => Promise<void> | void;
+  /** Called when a tool starts, updates, or completes execution.
+   * Use this to show real-time tool activity to the user. */
+  onToolActivity?: (event: ToolActivityEvent) => void | Promise<void>;
   /** Called when the typing controller cleans up (e.g., run ended with NO_REPLY). */
   onTypingCleanup?: () => void;
   onTypingController?: (typing: TypingController) => void;

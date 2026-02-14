@@ -39,6 +39,7 @@ import {
   resolveThreadSessionKeys,
 } from "./monitor-helpers.js";
 import { sendMessageMattermost } from "./send.js";
+import { createToolActivityTracker, type ToolActivityMode } from "./tool-activity.js";
 
 export type MonitorMattermostOpts = {
   botToken?: string;
@@ -863,6 +864,25 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         onReplyStart: typingCallbacks.onReplyStart,
       });
 
+    // Resolve tool activity mode: per-channel override > agent defaults > off.
+    const toolActivityMode: ToolActivityMode =
+      (account.config?.toolActivity as ToolActivityMode) ??
+      (cfg.agents?.defaults?.toolActivity as ToolActivityMode) ??
+      "off";
+
+    const toolActivityTracker =
+      toolActivityMode !== "off"
+        ? createToolActivityTracker({
+            client: createMattermostClient({
+              baseUrl: normalizeMattermostBaseUrl(account.baseUrl) ?? "",
+              botToken: account.botToken ?? "",
+            }),
+            channelId,
+            rootId: threadRootId,
+            mode: toolActivityMode,
+          })
+        : undefined;
+
     await core.channel.reply.dispatchReplyFromConfig({
       ctx: ctxPayload,
       cfg,
@@ -872,8 +892,22 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         disableBlockStreaming:
           typeof account.blockStreaming === "boolean" ? !account.blockStreaming : undefined,
         onModelSelected,
+        ...(toolActivityTracker
+          ? {
+              onToolActivity: (event) => {
+                if (event.phase === "start" || event.phase === "update") {
+                  toolActivityTracker.onActivity(event.toolCallId, event.summary);
+                } else if (event.phase === "end") {
+                  toolActivityTracker.onEnd(event.toolCallId);
+                }
+              },
+            }
+          : {}),
       },
     });
+    if (toolActivityTracker) {
+      await toolActivityTracker.onComplete();
+    }
     markDispatchIdle();
     if (historyKey) {
       clearHistoryEntriesIfEnabled({

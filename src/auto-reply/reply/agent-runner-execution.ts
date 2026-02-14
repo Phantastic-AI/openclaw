@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import type { TemplateContext } from "../templating.js";
 import type { VerboseLevel } from "../thinking.js";
-import type { GetReplyOptions, ReplyPayload } from "../types.js";
+import type { GetReplyOptions, ReplyPayload, ToolActivityEvent } from "../types.js";
 import type { FollowupRun } from "./queue.js";
 import type { TypingSignaler } from "./typing-mode.js";
 import { resolveAgentModelFallbacksOverride } from "../../agents/agent-scope.js";
@@ -17,6 +17,7 @@ import {
   sanitizeUserFacingText,
 } from "../../agents/pi-embedded-helpers.js";
 import { runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
+import { formatToolSummary, resolveToolDisplay } from "../../agents/tool-display.js";
 import {
   resolveAgentIdFromSessionKey,
   resolveGroupSessionKey,
@@ -345,6 +346,33 @@ export async function runAgentTurnWithFallback(params: {
                 const phase = typeof evt.data.phase === "string" ? evt.data.phase : "";
                 if (phase === "start" || phase === "update") {
                   await params.typingSignals.signalToolStart();
+                }
+
+                // Fire onToolActivity callback for real-time tool visibility.
+                if (
+                  params.opts?.onToolActivity &&
+                  (phase === "start" || phase === "update" || phase === "end")
+                ) {
+                  const toolName = typeof evt.data.name === "string" ? evt.data.name : "tool";
+                  const toolCallId =
+                    typeof evt.data.toolCallId === "string" ? evt.data.toolCallId : "";
+                  const args =
+                    phase === "start" && evt.data.args && typeof evt.data.args === "object"
+                      ? (evt.data.args as Record<string, unknown>)
+                      : undefined;
+                  const display = resolveToolDisplay({ name: toolName, args });
+                  const summary = formatToolSummary(display);
+                  const activityEvent: ToolActivityEvent = {
+                    phase: phase,
+                    toolName,
+                    toolCallId,
+                    summary,
+                    ...(args ? { args } : {}),
+                    ...(phase === "end" ? { isError: Boolean(evt.data.isError) } : {}),
+                  };
+                  void Promise.resolve(params.opts.onToolActivity(activityEvent)).catch((err) => {
+                    logVerbose(`tool activity callback failed: ${String(err)}`);
+                  });
                 }
               }
               // Track auto-compaction completion

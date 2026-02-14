@@ -180,6 +180,31 @@ export async function createMattermostPost(
   });
 }
 
+export async function updateMattermostPost(
+  client: MattermostClient,
+  params: {
+    postId: string;
+    message: string;
+  },
+): Promise<MattermostPost> {
+  return await client.request<MattermostPost>(`/posts/${params.postId}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      id: params.postId,
+      message: params.message,
+    }),
+  });
+}
+
+export async function deleteMattermostPost(
+  client: MattermostClient,
+  postId: string,
+): Promise<void> {
+  await client.request<Record<string, unknown>>(`/posts/${postId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function uploadMattermostFile(
   client: MattermostClient,
   params: {
