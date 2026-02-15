@@ -39,7 +39,12 @@ import {
   resolveThreadSessionKeys,
 } from "./monitor-helpers.js";
 import { sendMessageMattermost } from "./send.js";
-import { createToolActivityTracker, type ToolActivityMode } from "./tool-activity.js";
+import {
+  createToolActivityTracker,
+  createEditInPlaceTracker,
+  type ToolActivityConfig,
+  type EditInPlaceConfig,
+} from "./tool-activity.js";
 
 export type MonitorMattermostOpts = {
   botToken?: string;
@@ -864,24 +869,33 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         onReplyStart: typingCallbacks.onReplyStart,
       });
 
-    // Resolve tool activity mode: per-channel override > agent defaults > off.
-    const toolActivityMode: ToolActivityMode =
-      (account.config?.toolActivity as ToolActivityMode) ??
-      (cfg.agents?.defaults?.toolActivity as ToolActivityMode) ??
+    // Resolve tool activity config: per-channel override > agent defaults > off.
+    const toolActivityCfg: ToolActivityConfig =
+      (account.config?.toolActivity as ToolActivityConfig) ??
+      (cfg.agents?.defaults?.toolActivity as ToolActivityConfig) ??
       "off";
 
-    const toolActivityTracker =
-      toolActivityMode !== "off"
-        ? createToolActivityTracker({
-            client: createMattermostClient({
-              baseUrl: normalizeMattermostBaseUrl(account.baseUrl) ?? "",
-              botToken: account.botToken ?? "",
-            }),
-            channelId,
-            rootId: threadRootId,
-            mode: toolActivityMode,
-          })
-        : undefined;
+    const toolActivityTracker = (() => {
+      if (toolActivityCfg === "off") return undefined;
+      const mmClient = createMattermostClient({
+        baseUrl: normalizeMattermostBaseUrl(account.baseUrl) ?? "",
+        botToken: account.botToken ?? "",
+      });
+      if (typeof toolActivityCfg === "object" && toolActivityCfg.mode === "editInPlace") {
+        return createEditInPlaceTracker({
+          client: mmClient,
+          channelId,
+          rootId: threadRootId,
+          display: (toolActivityCfg as EditInPlaceConfig).display ?? "single",
+        });
+      }
+      return createToolActivityTracker({
+        client: mmClient,
+        channelId,
+        rootId: threadRootId,
+        mode: toolActivityCfg,
+      });
+    })();
 
     await core.channel.reply.dispatchReplyFromConfig({
       ctx: ctxPayload,

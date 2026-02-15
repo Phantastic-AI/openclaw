@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { MattermostClient } from "./client.js";
-import { createToolActivityTracker } from "./tool-activity.js";
+import { createToolActivityTracker, createEditInPlaceTracker } from "./tool-activity.js";
 
 function createMockClient() {
   const posts: Array<{ id: string; message: string; deleted?: boolean }> = [];
@@ -116,6 +116,114 @@ describe("createToolActivityTracker", () => {
       client,
       channelId: "ch-1",
       mode: "transient",
+    });
+
+    await tracker.onComplete();
+    expect(posts.length).toBe(0);
+  });
+});
+
+describe("createEditInPlaceTracker", () => {
+  it("creates a status post on first tool activity (single mode)", async () => {
+    const { client, posts } = createMockClient();
+    const tracker = createEditInPlaceTracker({
+      client,
+      channelId: "ch-1",
+      display: "single",
+    });
+
+    tracker.onActivity("tc-1", "🔍 Search: foo");
+    await tick();
+
+    expect(posts.length).toBe(1);
+    expect(posts[0].message).toBe("🔍 Search: foo");
+
+    await tracker.onComplete();
+  });
+
+  it("single mode replaces content with latest active tool", async () => {
+    const { client, posts } = createMockClient();
+    const tracker = createEditInPlaceTracker({
+      client,
+      channelId: "ch-1",
+      display: "single",
+    });
+
+    tracker.onActivity("tc-1", "🔍 Search: foo");
+    await tick();
+    tracker.onEnd("tc-1");
+    tracker.onActivity("tc-2", "📖 Read: bar.ts");
+    await tick();
+
+    expect(posts[0].message).toBe("📖 Read: bar.ts");
+
+    await tracker.onComplete();
+  });
+
+  it("list mode shows completed lines with strikethrough", async () => {
+    const { client, posts } = createMockClient();
+    const tracker = createEditInPlaceTracker({
+      client,
+      channelId: "ch-1",
+      display: "list",
+    });
+
+    tracker.onActivity("tc-1", "🔍 Search: foo");
+    await tick();
+    tracker.onEnd("tc-1");
+    tracker.onActivity("tc-2", "📖 Read: bar.ts");
+    await tick();
+
+    expect(posts[0].message).toBe("~~🔍 Search: foo~~\n📖 Read: bar.ts");
+
+    await tracker.onComplete();
+  });
+
+  it("list mode accumulates multiple completed lines", async () => {
+    const { client, posts } = createMockClient();
+    const tracker = createEditInPlaceTracker({
+      client,
+      channelId: "ch-1",
+      display: "list",
+    });
+
+    tracker.onActivity("tc-1", "🔍 Search: foo");
+    await tick();
+    tracker.onEnd("tc-1");
+    await tick();
+    tracker.onActivity("tc-2", "📖 Read: bar.ts");
+    await tick();
+    tracker.onEnd("tc-2");
+    await tick();
+    tracker.onActivity("tc-3", "✏️ Edit: baz.ts");
+    await tick();
+
+    expect(posts[0].message).toBe("~~🔍 Search: foo~~\n~~📖 Read: bar.ts~~\n✏️ Edit: baz.ts");
+
+    await tracker.onComplete();
+  });
+
+  it("deletes post on complete", async () => {
+    const { client, posts } = createMockClient();
+    const tracker = createEditInPlaceTracker({
+      client,
+      channelId: "ch-1",
+      display: "single",
+    });
+
+    tracker.onActivity("tc-1", "🔍 Search: foo");
+    await tick();
+    await tracker.onComplete();
+
+    expect(posts[0].deleted).toBe(true);
+  });
+
+  it("does not create post if no tools fire", async () => {
+    const { client, posts } = createMockClient();
+    const tracker = createEditInPlaceTracker({
+      client,
+      channelId: "ch-1",
+      display: "list",
     });
 
     await tracker.onComplete();
