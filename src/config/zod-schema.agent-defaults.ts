@@ -127,6 +127,17 @@ export const AgentDefaultsSchema = z
     timeoutSeconds: z.number().int().positive().optional(),
     mediaMaxMb: z.number().positive().optional(),
     typingIntervalSeconds: z.number().int().positive().optional(),
+    toolActivity: z
+      .union([
+        z.literal("off"),
+        z.literal("persist"),
+        z.literal("transient"),
+        z.object({
+          mode: z.literal("editInPlace"),
+          display: z.union([z.literal("single"), z.literal("list")]).default("single"),
+        }),
+      ])
+      .optional(),
     typingMode: z
       .union([
         z.literal("never"),

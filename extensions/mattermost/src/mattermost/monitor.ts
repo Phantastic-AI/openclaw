@@ -39,6 +39,12 @@ import {
   resolveThreadSessionKeys,
 } from "./monitor-helpers.js";
 import { sendMessageMattermost } from "./send.js";
+import {
+  createToolActivityTracker,
+  createEditInPlaceTracker,
+  type ToolActivityConfig,
+  type EditInPlaceConfig,
+} from "./tool-activity.js";
 
 export type MonitorMattermostOpts = {
   botToken?: string;
@@ -863,6 +869,34 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         onReplyStart: typingCallbacks.onReplyStart,
       });
 
+    // Resolve tool activity config: per-channel override > agent defaults > off.
+    const toolActivityCfg: ToolActivityConfig =
+      (account.config?.toolActivity as ToolActivityConfig) ??
+      (cfg.agents?.defaults?.toolActivity as ToolActivityConfig) ??
+      "off";
+
+    const toolActivityTracker = (() => {
+      if (toolActivityCfg === "off") return undefined;
+      const mmClient = createMattermostClient({
+        baseUrl: normalizeMattermostBaseUrl(account.baseUrl) ?? "",
+        botToken: account.botToken ?? "",
+      });
+      if (typeof toolActivityCfg === "object" && toolActivityCfg.mode === "editInPlace") {
+        return createEditInPlaceTracker({
+          client: mmClient,
+          channelId,
+          rootId: threadRootId,
+          display: (toolActivityCfg as EditInPlaceConfig).display ?? "single",
+        });
+      }
+      return createToolActivityTracker({
+        client: mmClient,
+        channelId,
+        rootId: threadRootId,
+        mode: toolActivityCfg,
+      });
+    })();
+
     await core.channel.reply.dispatchReplyFromConfig({
       ctx: ctxPayload,
       cfg,
@@ -872,8 +906,22 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         disableBlockStreaming:
           typeof account.blockStreaming === "boolean" ? !account.blockStreaming : undefined,
         onModelSelected,
+        ...(toolActivityTracker
+          ? {
+              onToolActivity: (event) => {
+                if (event.phase === "start" || event.phase === "update") {
+                  toolActivityTracker.onActivity(event.toolCallId, event.summary);
+                } else if (event.phase === "end") {
+                  toolActivityTracker.onEnd(event.toolCallId);
+                }
+              },
+            }
+          : {}),
       },
     });
+    if (toolActivityTracker) {
+      await toolActivityTracker.onComplete();
+    }
     markDispatchIdle();
     if (historyKey) {
       clearHistoryEntriesIfEnabled({

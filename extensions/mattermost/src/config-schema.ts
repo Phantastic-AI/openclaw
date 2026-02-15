@@ -25,6 +25,15 @@ const MattermostAccountSchemaBase = z
     groupPolicy: GroupPolicySchema.optional().default("allowlist"),
     textChunkLimit: z.number().int().positive().optional(),
     chunkMode: z.enum(["length", "newline"]).optional(),
+    toolActivity: z
+      .union([
+        z.enum(["off", "persist", "transient"]),
+        z.object({
+          mode: z.literal("editInPlace"),
+          display: z.enum(["single", "list"]).default("single"),
+        }),
+      ])
+      .optional(),
     blockStreaming: z.boolean().optional(),
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
     responsePrefix: z.string().optional(),
