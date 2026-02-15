@@ -893,7 +893,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         client: mmClient,
         channelId,
         rootId: threadRootId,
-        mode: toolActivityCfg,
+        mode: toolActivityCfg as "persist" | "transient",
       });
     })();
 

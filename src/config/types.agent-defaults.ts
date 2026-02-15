@@ -161,6 +161,12 @@ export type AgentDefaultsConfig = {
   /** Max inbound media size in MB for agent-visible attachments (text note or future image attach). */
   mediaMaxMb?: number;
   typingIntervalSeconds?: number;
+  /** Tool activity visibility mode. */
+  toolActivity?:
+    | "off"
+    | "persist"
+    | "transient"
+    | { mode: "editInPlace"; display?: "single" | "list" };
   /** Typing indicator start mode (never|instant|thinking|message). */
   typingMode?: TypingMode;
   /** Periodic background heartbeat runs. */

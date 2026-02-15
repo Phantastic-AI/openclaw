@@ -67,6 +67,61 @@ bash pty:true workdir:~/Projects/myproject command:"codex exec 'Add error handli
 
 ---
 
+## Repo Setup (Standard Agent Files)
+
+Before starting significant coding-agent work in a repo, scaffold the standard agent files with `setup-coding-agents`:
+
+```bash
+# In an existing repo (default template)
+setup-coding-agents
+
+# Explicit template + explicit target
+setup-coding-agents hal /path/to/repo
+```
+
+This will copy:
+
+- `AGENTS.md`
+- `.agents/template/PLAN.md`
+
+...and create symlinks:
+
+- `CLAUDE.md` -> `AGENTS.md`
+- `GEMINI.md` -> `AGENTS.md`
+
+Templates live at `/home/debian/clawd/home/Workspace/coding-agent-templates` (override with `CODING_AGENT_TEMPLATES_DIR`).
+
+Note: `setup-coding-agents` does **not** create a git repo. If you're in a scratch directory, you still need `git init` for Codex.
+
+**⚠️ NEVER run `setup-coding-agents` in `~/clawd/`** — that's the master workspace with HAL's AGENTS.md. Every other repo is fair game.
+
+### Default Workflow: Claude Code Builds, Codex Reviews
+
+For implementation tasks, use this two-phase approach:
+
+1. **Claude Code** implements the feature (`claude -p '...' --dangerously-skip-permissions`)
+2. **Codex** reviews the changes (`codex exec 'Review the changes on branch X...'`)
+
+**Resumability:**
+
+- `claude --resume <session-id>` — YES, resumable across restarts
+- `codex exec` — NO, one-shot only. Not resumable.
+
+For long investigations or multi-step work, prefer Claude Code.
+
+### Post-Scaffold: Customize AGENTS.md
+
+After running `setup-coding-agents`, **always** customize the project's AGENTS.md with:
+
+1. **Parent Phorge ticket** — link to the main task (e.g. `[T287](https://hub.phantastic.ai/T287)`)
+2. **Wiki page** — link to the Phriction project doc (e.g. `[projects/foo](https://hub.phantastic.ai/w/projects/foo/)`)
+3. **Phorge project tag** — so tickets can be found (e.g. `[#project-name](https://hub.phantastic.ai/tag/project-name/)`)
+4. **Project-specific context** — architecture, key paths, dependencies
+
+Don't leave the template AGENTS.md as-is. The coding agent needs project context to do good work.
+
+---
+
 ## The Pattern: workdir + background + pty
 
 For longer tasks, use background mode with PTY:
@@ -98,7 +153,7 @@ process action:kill sessionId:XXX
 
 ## Codex CLI
 
-**Model:** `gpt-5.2-codex` is the default (set in ~/.codex/config.toml)
+**Model:** `gpt-5.3-codex` with `xhigh` reasoning is the default (set in ~/.codex/config.toml)
 
 ### Flags
 
@@ -156,6 +211,49 @@ gh pr comment <PR#> --body "<review content>"
 ---
 
 ## Claude Code
+
+### Headless Mode (default for automation)
+
+Full YOLO (`--dangerously-skip-permissions`) is the default — **pick the workdir carefully**.
+
+```bash
+# One-shot headless (PTY still recommended)
+bash pty:true workdir:~/project command:"claude -p 'Your task' --dangerously-skip-permissions"
+
+# Background for longer work
+bash pty:true workdir:~/project background:true command:"claude -p 'Your task' --dangerously-skip-permissions"
+```
+
+### Key Flags
+
+| Flag                             | Effect                                       |
+| -------------------------------- | -------------------------------------------- |
+| `-p` / `--print`                 | Headless mode, exits after completion        |
+| `--dangerously-skip-permissions` | Full YOLO — no approvals, no sandbox         |
+| `--output-format stream-json`    | Structured output for parsing                |
+| `--resume <session-id>`          | Continue a prior session (by UUID)           |
+| `--model opus`                   | Override model (aliases: sonnet, opus, etc.) |
+| `--session-id <uuid>`            | Set specific session UUID                    |
+| `--max-budget-usd <amount>`      | Spending cap per run                         |
+
+### Session Tracking with tmux
+
+Claude Code doesn't support named sessions — only UUIDs. Use **tmux session names** for human-readable tracking. Always include a semantic name; include the Phorge task ID where one exists:
+
+```bash
+# With task ID: T<id>-<semantic-slug>
+tmux new-session -d -s T291-setup-ovh2 -c /path/to/project \
+  "claude -p 'Your task' --dangerously-skip-permissions"
+
+# Without task ID: just the semantic name
+tmux new-session -d -s fix-cors-headers -c /path/to/project \
+  "claude -p 'Your task' --dangerously-skip-permissions"
+
+# Attach to monitor
+tmux attach -t T291-setup-ovh2
+```
+
+### Interactive Mode
 
 ```bash
 # With PTY for proper terminal output
@@ -271,7 +369,55 @@ bash pty:true workdir:~/project background:true command:"codex --yolo exec 'Buil
 When completely finished, run: openclaw system event --text \"Done: Built todos REST API with CRUD endpoints\" --mode now'"
 ```
 
-This triggers an immediate wake event — Skippy gets pinged in seconds, not 10 minutes.
+This triggers an immediate wake event — HAL gets pinged in seconds, not 10 minutes.
+
+---
+
+## `.agents/project.md` Convention
+
+When working on a tracked project, create/maintain `.agents/project.md` in the repo root. This serves as both a **project manifest** (for scaffold interpolation) and an **append-only work log**.
+
+```markdown
+# .agents/project.md
+
+## Project
+
+ticket: T308
+wiki: https://hub.phantastic.ai/w/projects/agent-tool/
+project: #agent-tool
+
+## Work Log
+
+### 2026-02-14 — Initial scaffold
+
+- Setup repo, AGENTS.md, symlinks
+- Claude Code: built CLI skeleton
+- Codex: reviewed, suggested error handling improvements
+```
+
+**Rules:**
+
+- `setup-coding-agents` reads this to auto-populate AGENTS.md with ticket/wiki/project links
+- Append new entries per session — never overwrite previous entries
+- Keep entries terse: date, what was done, which agent, outcome
+
+---
+
+## Provider Routing (Future)
+
+Coding agents can be proxied through different providers for cost/speed tradeoffs:
+
+| Intent              | Provider    | Model            | Use Case                         |
+| ------------------- | ----------- | ---------------- | -------------------------------- |
+| Deep implementation | Anthropic   | Claude Opus      | Complex features, architecture   |
+| Fast iteration      | z.ai        | Claude (proxied) | Quick fixes, non-sensitive tasks |
+| Review/audit        | OpenAI      | GPT-5.3-Codex    | Code review, one-shot analysis   |
+| Fast/cheap          | Infinity AI | GLM              | Boilerplate, simple tasks        |
+| Fast/cheap          | Fireworks   | Kimi K2.5        | Boilerplate, simple tasks        |
+
+The semantic intent matters more than the provider name. When proxying Claude Code through z.ai, it's about _why_ (fast, cheap, non-sensitive) not _where_.
+
+**T308 (agent-tool)** is building a CLI that abstracts this: you specify intent, it picks the right provider/model combo.
 
 ---
 
@@ -282,3 +428,10 @@ This triggers an immediate wake event — Skippy gets pinged in seconds, not 10 
 - **exec is your friend:** `codex exec "prompt"` runs and exits cleanly - perfect for one-shots.
 - **submit vs write:** Use `submit` to send input + Enter, `write` for raw data without newline.
 - **Sass works:** Codex responds well to playful prompts. Asked it to write a haiku about being second fiddle to a space lobster, got: _"Second chair, I code / Space lobster sets the tempo / Keys glow, I follow"_ 🦞
+
+## Learnings (Feb 2026)
+
+- **Codex is NOT resumable:** `codex exec` is one-shot only. No `--resume`. For multi-step work, use Claude Code which supports `claude --resume <session-id>`.
+- **Auto-notify is standard:** Always append `openclaw system event --text "Done: ..." --mode now` to background agent prompts. No more polling.
+- **`.agents/project.md`:** Append-only work log + manifest. `setup-coding-agents` reads it for interpolation. Create it when you `init` a repo with a ticket.
+- **Provider routing is coming:** GLM on Infinity AI, Kimi K2.5 on Fireworks, Claude via z.ai — pick by intent (speed/cost/depth), not by brand.
