@@ -830,7 +830,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       core.channel.reply.createReplyDispatcherWithTyping({
         ...prefixOptions,
         humanDelay: core.channel.reply.resolveHumanDelayConfig(cfg, route.agentId),
-        deliver: async (payload: ReplyPayload) => {
+        deliver: async (payload: ReplyPayload, info?: { kind?: string }) => {
           const mediaUrls = payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : []);
           const text = core.channel.text.convertMarkdownTables(payload.text ?? "", tableMode);
           if (mediaUrls.length === 0) {
@@ -840,10 +840,19 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
               account.accountId,
             );
             const chunks = core.channel.text.chunkMarkdownTextWithMode(text, textLimit, chunkMode);
+            const canEditFinalReply = info?.kind === "final";
+            let firstChunk = true;
             for (const chunk of chunks.length > 0 ? chunks : [text]) {
               if (!chunk) {
                 continue;
               }
+              // For the first chunk, try to reuse the editInPlace status post.
+              if (canEditFinalReply && firstChunk && toolActivityTracker?.editFinalReply) {
+                firstChunk = false;
+                const claimed = await toolActivityTracker.editFinalReply(chunk);
+                if (claimed) continue;
+              }
+              firstChunk = false;
               await sendMessageMattermost(to, chunk, {
                 accountId: account.accountId,
                 replyToId: threadRootId,

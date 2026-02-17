@@ -17,6 +17,14 @@ export type ToolActivityTracker = {
   onEnd: (toolCallId: string) => void;
   /** Called when the entire reply is complete — cleanup the status post. */
   onComplete: () => Promise<void>;
+  /** Returns the current status post id (editInPlace only). */
+  getStatusPostId?: () => string | undefined;
+  /**
+   * Edit the status post to become the final reply text, claiming the post
+   * so that onComplete() becomes a no-op. Returns true if successful.
+   * Only available on editInPlace trackers.
+   */
+  editFinalReply?: (text: string) => Promise<boolean>;
 };
 
 /**
@@ -144,6 +152,11 @@ export function createEditInPlaceTracker(params: {
   let pending: Promise<void> = Promise.resolve();
   let completed = false;
 
+  // When true, tool activity should stop mutating the status post.
+  // - During editFinalReply: prevents new enqueues while we wait for `pending`.
+  // - After a successful editFinalReply: `claimed` stays true to freeze the post permanently.
+  let finalizing = false;
+
   function buildMessage(): string {
     if (display === "single") {
       // Show only the most recent active tool, or a "done" marker.
@@ -166,7 +179,7 @@ export function createEditInPlaceTracker(params: {
   }
 
   function syncPost(): void {
-    if (completed) return;
+    if (completed || finalizing || claimed) return;
     enqueue(async () => {
       if (completed) return;
       const message = buildMessage();
@@ -194,13 +207,19 @@ export function createEditInPlaceTracker(params: {
     });
   }
 
+  // When true, the status post has been claimed by editFinalReply
+  // and onComplete should not touch it.
+  let claimed = false;
+
   return {
     onActivity(toolCallId: string, summary: string) {
+      if (completed || finalizing || claimed) return;
       activeTools.set(toolCallId, summary);
       syncPost();
     },
 
     onEnd(toolCallId: string) {
+      if (completed || finalizing || claimed) return;
       const summary = activeTools.get(toolCallId);
       activeTools.delete(toolCallId);
       if (display === "list" && summary) {
@@ -212,14 +231,46 @@ export function createEditInPlaceTracker(params: {
     async onComplete() {
       completed = true;
       await pending;
-      if (!statusPostId) return;
-      // Delete the activity post — the agent reply is the final message.
+      if (!statusPostId || claimed) return;
+      // Fallback: delete if not claimed by editFinalReply.
       try {
         await deleteMattermostPost(client, statusPostId);
       } catch {
         // Best-effort cleanup.
       }
       statusPostId = undefined;
+    },
+
+    getStatusPostId() {
+      return statusPostId;
+    },
+
+    async editFinalReply(text: string): Promise<boolean> {
+      try {
+        finalizing = true;
+        // Wait for any pending post creates/updates to finish. While finalizing,
+        // onActivity/onEnd will not enqueue additional edits.
+        await pending;
+        if (!statusPostId) {
+          const post = await createMattermostPost(client, {
+            channelId,
+            message: text,
+            rootId,
+          });
+          statusPostId = post.id;
+        } else {
+          await updateMattermostPost(client, {
+            postId: statusPostId,
+            message: text,
+          });
+        }
+        claimed = true;
+        return true;
+      } catch {
+        return false;
+      } finally {
+        finalizing = false;
+      }
     },
   };
 }

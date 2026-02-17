@@ -218,6 +218,54 @@ describe("createEditInPlaceTracker", () => {
     expect(posts[0].deleted).toBe(true);
   });
 
+  it("editFinalReply claims the status post and prevents deletion on complete", async () => {
+    const { client, posts } = createMockClient();
+    const tracker = createEditInPlaceTracker({
+      client,
+      channelId: "ch-1",
+      display: "single",
+    });
+
+    tracker.onActivity("tc-1", "🔍 Search: foo");
+    await tick();
+
+    if (!tracker.editFinalReply) {
+      throw new Error("editFinalReply missing on edit-in-place tracker");
+    }
+    const claimed = await tracker.editFinalReply("Final reply");
+    expect(claimed).toBe(true);
+    expect(posts[0].message).toBe("Final reply");
+
+    await tracker.onComplete();
+    expect(posts[0].deleted).toBeUndefined();
+  });
+
+  it("editFinalReply freezes the post against further tool updates (claimed)", async () => {
+    const { client, posts } = createMockClient();
+    const tracker = createEditInPlaceTracker({
+      client,
+      channelId: "ch-1",
+      display: "list",
+    });
+
+    tracker.onActivity("tc-1", "🔍 Search: foo");
+    await tick();
+
+    if (!tracker.editFinalReply) {
+      throw new Error("editFinalReply missing on edit-in-place tracker");
+    }
+    const claimed = await tracker.editFinalReply("Final reply");
+    expect(claimed).toBe(true);
+
+    tracker.onActivity("tc-2", "📖 Read: bar.ts");
+    await tick();
+    expect(posts[0].message).toBe("Final reply");
+
+    tracker.onEnd("tc-2");
+    await tick();
+    expect(posts[0].message).toBe("Final reply");
+  });
+
   it("does not create post if no tools fire", async () => {
     const { client, posts } = createMockClient();
     const tracker = createEditInPlaceTracker({
