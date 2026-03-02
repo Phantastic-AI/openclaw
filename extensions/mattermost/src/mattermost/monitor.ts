@@ -14,6 +14,7 @@ import {
   logInboundDrop,
   logTypingFailure,
   buildPendingHistoryContextFromMap,
+  clearHistoryEntriesIfEnabled,
   DEFAULT_GROUP_HISTORY_LIMIT,
   recordPendingHistoryEntryIfEnabled,
   isDangerousNameMatchingEnabled,
