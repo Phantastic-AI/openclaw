@@ -74,56 +74,36 @@ describe("stripSilentToken", () => {
 });
 
 describe("isSilentReplyPrefixText", () => {
-  it("matches uppercase token lead fragments", () => {
+  it("T621: holds back all uppercase prefixes of NO_REPLY during streaming", () => {
+    // Every strict uppercase prefix is buffered to prevent leaking partial tokens
+    expect(isSilentReplyPrefixText("N")).toBe(true);
     expect(isSilentReplyPrefixText("NO")).toBe(true);
     expect(isSilentReplyPrefixText("NO_")).toBe(true);
     expect(isSilentReplyPrefixText("NO_RE")).toBe(true);
     expect(isSilentReplyPrefixText("NO_REPLY")).toBe(true);
-    expect(isSilentReplyPrefixText("  HEARTBEAT_", "HEARTBEAT_OK")).toBe(true);
   });
 
-  it("rejects mixed-case and non-prefix text", () => {
-    expect(isSilentReplyPrefixText("No")).toBe(false);
-    expect(isSilentReplyPrefixText("no")).toBe(false);
-    expect(isSilentReplyPrefixText("Hello")).toBe(false);
-    expect(isSilentReplyPrefixText("n")).toBe(false);
-  });
-
-  it("catches all uppercase prefixes up to and including pre-underscore segment", () => {
-    // Single char prefix — held back to prevent leak
-    expect(isSilentReplyPrefixText("N")).toBe(true);
-    // Full pre-underscore segment
-    expect(isSilentReplyPrefixText("NO")).toBe(true);
-    expect(isSilentReplyPrefixText("HEARTBEAT", "HEARTBEAT_OK")).toBe(true);
-    // Partial pre-underscore segments also held back
+  it("holds back prefixes of custom tokens (HEARTBEAT_OK)", () => {
     expect(isSilentReplyPrefixText("H", "HEARTBEAT_OK")).toBe(true);
     expect(isSilentReplyPrefixText("HE", "HEARTBEAT_OK")).toBe(true);
     expect(isSilentReplyPrefixText("HEART", "HEARTBEAT_OK")).toBe(true);
-    // Once underscore is included, existing prefix logic applies
-    expect(isSilentReplyPrefixText("HEARTBEAT_", "HEARTBEAT_OK")).toBe(true);
-  });
-
-  it("rejects non-prefixes and mixed characters", () => {
-    expect(isSilentReplyPrefixText("NO_X")).toBe(false);
-    expect(isSilentReplyPrefixText("NO_REPLY more")).toBe(false);
-    expect(isSilentReplyPrefixText("NO-")).toBe(false);
-  });
-
-  it("T621: holds back all streaming fragments that could be silent token prefixes", () => {
-    // Single char — buffered, not leaked
-    expect(isSilentReplyPrefixText("N")).toBe(true);
-    // Pre-underscore segment — the actual observed leak
-    expect(isSilentReplyPrefixText("NO")).toBe(true);
-    // Full token
-    expect(isSilentReplyPrefixText("NO_REPLY")).toBe(true);
-    // HEARTBEAT_OK variants
-    expect(isSilentReplyPrefixText("H", "HEARTBEAT_OK")).toBe(true);
     expect(isSilentReplyPrefixText("HEARTBEAT", "HEARTBEAT_OK")).toBe(true);
-    // Mixed case → not a streaming fragment, real text
+    expect(isSilentReplyPrefixText("HEARTBEAT_", "HEARTBEAT_OK")).toBe(true);
+    expect(isSilentReplyPrefixText("  HEARTBEAT_", "HEARTBEAT_OK")).toBe(true);
+  });
+
+  it("rejects mixed-case, lowercase, and non-prefix strings", () => {
+    // Mixed/lower case — real text, not a streaming fragment
     expect(isSilentReplyPrefixText("No")).toBe(false);
     expect(isSilentReplyPrefixText("no")).toBe(false);
-    // Non-prefixes
+    expect(isSilentReplyPrefixText("n")).toBe(false);
+    expect(isSilentReplyPrefixText("Hello")).toBe(false);
+    // Uppercase but not a valid prefix of the token
     expect(isSilentReplyPrefixText("NX")).toBe(false);
     expect(isSilentReplyPrefixText("NOPE")).toBe(false);
+    expect(isSilentReplyPrefixText("NO_X")).toBe(false);
+    expect(isSilentReplyPrefixText("NO-")).toBe(false);
+    // Token with trailing content — real text
+    expect(isSilentReplyPrefixText("NO_REPLY more")).toBe(false);
   });
 });
