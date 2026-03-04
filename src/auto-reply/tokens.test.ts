@@ -89,10 +89,13 @@ describe("isSilentReplyPrefixText", () => {
     expect(isSilentReplyPrefixText("Hello")).toBe(false);
   });
 
-  it("keeps underscore guard for non-NO_REPLY tokens", () => {
+  it("allows exact pre-underscore segment for any token", () => {
+    // Full pre-underscore segments match
+    expect(isSilentReplyPrefixText("HEARTBEAT", "HEARTBEAT_OK")).toBe(true);
+    // Partial pre-underscore segments do not match
     expect(isSilentReplyPrefixText("HE", "HEARTBEAT_OK")).toBe(false);
     expect(isSilentReplyPrefixText("HEART", "HEARTBEAT_OK")).toBe(false);
-    expect(isSilentReplyPrefixText("HEARTBEAT", "HEARTBEAT_OK")).toBe(false);
+    // Once underscore is included, existing prefix logic applies
     expect(isSilentReplyPrefixText("HEARTBEAT_", "HEARTBEAT_OK")).toBe(true);
   });
 
@@ -100,5 +103,15 @@ describe("isSilentReplyPrefixText", () => {
     expect(isSilentReplyPrefixText("NO_X")).toBe(false);
     expect(isSilentReplyPrefixText("NO_REPLY more")).toBe(false);
     expect(isSilentReplyPrefixText("NO-")).toBe(false);
+  });
+
+  it("T621: catches pre-underscore prefix NO for NO_REPLY streaming fragment", () => {
+    expect(isSilentReplyPrefixText("NO")).toBe(true);
+    expect(isSilentReplyPrefixText("HEARTBEAT", "HEARTBEAT_OK")).toBe(true);
+    expect(isSilentReplyPrefixText("N")).toBe(false);
+    expect(isSilentReplyPrefixText("No")).toBe(false);
+    expect(isSilentReplyPrefixText("HE", "HEARTBEAT_OK")).toBe(false);
+    expect(isSilentReplyPrefixText("NX")).toBe(false);
+    expect(isSilentReplyPrefixText("NOPE")).toBe(false);
   });
 });

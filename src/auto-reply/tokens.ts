@@ -82,8 +82,12 @@ export function isSilentReplyPrefixText(
   if (normalized.includes("_")) {
     return true;
   }
-  // Keep underscore guard for generic tokens to avoid suppressing unrelated
-  // uppercase words (e.g. HEART/HE with HEARTBEAT_OK). Only allow bare "NO"
-  // because NO_REPLY streaming can transiently emit that fragment.
-  return tokenUpper === SILENT_REPLY_TOKEN && normalized === "NO";
+  // Allow the exact pre-underscore segment of the token (e.g. "NO" for "NO_REPLY",
+  // "HEARTBEAT" for "HEARTBEAT_OK") — streaming can transiently emit that fragment
+  // before the underscore arrives.
+  const underscoreIdx = tokenUpper.indexOf("_");
+  if (underscoreIdx > 0 && normalized === tokenUpper.slice(0, underscoreIdx)) {
+    return true;
+  }
+  return false;
 }
