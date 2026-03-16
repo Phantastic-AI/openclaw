@@ -80,6 +80,25 @@ describe("createMattermostDraftStream", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("clears the preview post when no final reply is delivered", async () => {
+    const { client, calls } = createMockClient();
+    const stream = createMattermostDraftStream({
+      client,
+      channelId: "channel-1",
+      rootId: "root-1",
+      throttleMs: 0,
+    });
+
+    stream.update("Working...");
+    await stream.flush();
+    await stream.clear();
+
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.path).toBe("/posts/post-1");
+    expect(calls[1]?.init?.method).toBe("DELETE");
+    expect(stream.postId()).toBeUndefined();
+  });
+
   it("warns and stops when preview creation fails", async () => {
     const warn = vi.fn();
     const requestImpl: MattermostClient["request"] = async () => {
