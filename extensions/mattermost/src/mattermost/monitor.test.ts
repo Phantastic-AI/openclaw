@@ -180,20 +180,29 @@ describe("canFinalizeMattermostPreviewInPlace", () => {
 });
 
 describe("shouldClearMattermostDraftPreview", () => {
-  it("clears a stale preview when no final reply was queued", () => {
+  it("clears a stale preview when no final reply was delivered", () => {
     expect(
       shouldClearMattermostDraftPreview({
-        queuedFinal: false,
         finalizedViaPreviewPost: false,
+        finalReplyDelivered: false,
       }),
     ).toBe(true);
+  });
+
+  it("keeps the preview when the final reply was delivered normally", () => {
+    expect(
+      shouldClearMattermostDraftPreview({
+        finalizedViaPreviewPost: false,
+        finalReplyDelivered: true,
+      }),
+    ).toBe(false);
   });
 
   it("keeps the preview when it already became the final reply", () => {
     expect(
       shouldClearMattermostDraftPreview({
-        queuedFinal: false,
         finalizedViaPreviewPost: true,
+        finalReplyDelivered: false,
       }),
     ).toBe(false);
   });
