@@ -7,25 +7,34 @@ type RequestRecord = {
   init?: RequestInit;
 };
 
-function createMockClient(): { client: MattermostClient; calls: RequestRecord[] } {
+function createMockClient(): {
+  client: MattermostClient;
+  calls: RequestRecord[];
+  requestMock: ReturnType<typeof vi.fn>;
+} {
   const calls: RequestRecord[] = [];
   let nextId = 1;
+  const requestImpl: MattermostClient["request"] = async <T>(
+    path: string,
+    init?: RequestInit,
+  ): Promise<T> => {
+    calls.push({ path, init });
+    if (path === "/posts") {
+      return { id: `post-${nextId++}` } as T;
+    }
+    if (path.startsWith("/posts/")) {
+      return { id: "patched" } as T;
+    }
+    return {} as T;
+  };
+  const requestMock = vi.fn(requestImpl);
   const client: MattermostClient = {
     baseUrl: "https://chat.example.com",
     apiBaseUrl: "https://chat.example.com/api/v4",
     token: "token",
-    request: vi.fn(async <T>(path: string, init?: RequestInit): Promise<T> => {
-      calls.push({ path, init });
-      if (path === "/posts") {
-        return { id: `post-${nextId++}` } as T;
-      }
-      if (path.startsWith("/posts/")) {
-        return { id: "patched" } as T;
-      }
-      return {} as T;
-    }),
+    request: requestMock as MattermostClient["request"],
   };
-  return { client, calls };
+  return { client, calls, requestMock };
 }
 
 describe("createMattermostDraftStream", () => {
@@ -73,13 +82,15 @@ describe("createMattermostDraftStream", () => {
 
   it("warns and stops when preview creation fails", async () => {
     const warn = vi.fn();
+    const requestImpl: MattermostClient["request"] = async () => {
+      throw new Error("boom");
+    };
+    const requestMock = vi.fn(requestImpl);
     const client: MattermostClient = {
       baseUrl: "https://chat.example.com",
       apiBaseUrl: "https://chat.example.com/api/v4",
       token: "token",
-      request: vi.fn(async () => {
-        throw new Error("boom");
-      }),
+      request: requestMock as MattermostClient["request"],
     };
     const stream = createMattermostDraftStream({
       client,
@@ -94,7 +105,7 @@ describe("createMattermostDraftStream", () => {
     await stream.flush();
 
     expect(warn).toHaveBeenCalled();
-    expect(client.request).toHaveBeenCalledTimes(1);
+    expect(requestMock).toHaveBeenCalledTimes(1);
     expect(stream.postId()).toBeUndefined();
   });
 });

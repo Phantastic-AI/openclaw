@@ -1818,16 +1818,16 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           if (payload.isReasoning) {
             return;
           }
+          const finalReplyRootId = resolveMattermostReplyRootId({
+            threadRootId: effectiveReplyToId,
+            replyToId: payload.replyToId,
+          });
           const isFinal = info.kind === "final";
           if (isFinal) {
             await draftStream.flush();
             const hasMedia = Boolean(payload.mediaUrl) || (payload.mediaUrls?.length ?? 0) > 0;
             const previewFinalText = resolvePreviewFinalText(payload.text);
             const previewPostId = draftStream.postId();
-            const finalReplyRootId = resolveMattermostReplyRootId({
-              threadRootId: effectiveReplyToId,
-              replyToId: payload.replyToId,
-            });
 
             if (
               typeof previewPostId === "string" &&
