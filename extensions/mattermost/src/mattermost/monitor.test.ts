@@ -2,6 +2,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/mattermost";
 import { describe, expect, it, vi } from "vitest";
 import { resolveMattermostAccount } from "./accounts.js";
 import {
+  canFinalizeMattermostPreviewInPlace,
   evaluateMattermostMentionGate,
   resolveMattermostEffectiveReplyToId,
   resolveMattermostReplyRootId,
@@ -154,6 +155,26 @@ describe("resolveMattermostReplyRootId", () => {
 
   it("falls back to undefined when neither reply target is available", () => {
     expect(resolveMattermostReplyRootId({})).toBeUndefined();
+  });
+});
+
+describe("canFinalizeMattermostPreviewInPlace", () => {
+  it("allows in-place finalization when the final reply target matches the preview thread", () => {
+    expect(
+      canFinalizeMattermostPreviewInPlace({
+        previewRootId: "thread-root-456",
+        threadRootId: "thread-root-456",
+        replyToId: "child-post-789",
+      }),
+    ).toBe(true);
+  });
+
+  it("prevents in-place finalization when a top-level preview would become a threaded reply", () => {
+    expect(
+      canFinalizeMattermostPreviewInPlace({
+        replyToId: "child-post-789",
+      }),
+    ).toBe(false);
   });
 });
 

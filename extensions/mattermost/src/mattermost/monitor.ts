@@ -277,6 +277,19 @@ export function resolveMattermostReplyRootId(params: {
   return params.replyToId?.trim() || undefined;
 }
 
+export function canFinalizeMattermostPreviewInPlace(params: {
+  previewRootId?: string;
+  threadRootId?: string;
+  replyToId?: string;
+}): boolean {
+  return (
+    resolveMattermostReplyRootId({
+      threadRootId: params.threadRootId,
+      replyToId: params.replyToId,
+    }) === params.previewRootId?.trim()
+  );
+}
+
 export function resolveMattermostEffectiveReplyToId(params: {
   kind: ChatType;
   postId?: string | null;
@@ -1811,11 +1824,20 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
             const hasMedia = Boolean(payload.mediaUrl) || (payload.mediaUrls?.length ?? 0) > 0;
             const previewFinalText = resolvePreviewFinalText(payload.text);
             const previewPostId = draftStream.postId();
+            const finalReplyRootId = resolveMattermostReplyRootId({
+              threadRootId: effectiveReplyToId,
+              replyToId: payload.replyToId,
+            });
 
             if (
               typeof previewPostId === "string" &&
               !hasMedia &&
               typeof previewFinalText === "string" &&
+              canFinalizeMattermostPreviewInPlace({
+                previewRootId: effectiveReplyToId,
+                threadRootId: effectiveReplyToId,
+                replyToId: payload.replyToId,
+              }) &&
               !payload.isError
             ) {
               try {
@@ -1851,10 +1873,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
             to,
             accountId: account.accountId,
             agentId: route.agentId,
-            replyToId: resolveMattermostReplyRootId({
-              threadRootId: effectiveReplyToId,
-              replyToId: payload.replyToId,
-            }),
+            replyToId: finalReplyRootId,
             textLimit,
             tableMode,
             sendMessage: sendMessageMattermost,
