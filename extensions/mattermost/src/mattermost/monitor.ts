@@ -46,6 +46,7 @@ import {
   type MattermostPost,
   type MattermostUser,
 } from "./client.js";
+import { buildMattermostToolStatusText, createMattermostDraftStream } from "./draft-stream.js";
 import {
   buildButtonProps,
   computeInteractionCallbackUrl,
@@ -1735,12 +1736,111 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         });
       },
     });
-    const { dispatcher, replyOptions, markDispatchIdle } =
+    const draftStream = createMattermostDraftStream({
+      client,
+      channelId,
+      rootId: effectiveReplyToId,
+      throttleMs: 1200,
+      log: logVerboseMessage,
+      warn: logVerboseMessage,
+    });
+    let lastPartialText = "";
+    let finalizedViaPreviewPost = false;
+
+    const resolvePreviewFinalText = (text?: string) => {
+      if (typeof text !== "string") {
+        return undefined;
+      }
+      const formatted = core.channel.text.convertMarkdownTables(text, tableMode);
+      const chunkMode = core.channel.text.resolveChunkMode(cfg, "mattermost", account.accountId);
+      const chunks = core.channel.text.chunkMarkdownTextWithMode(formatted, textLimit, chunkMode);
+      if (!chunks.length && formatted) {
+        chunks.push(formatted);
+      }
+      if (chunks.length !== 1) {
+        return undefined;
+      }
+      const trimmed = chunks[0]?.trim();
+      if (!trimmed) {
+        return undefined;
+      }
+      if (
+        lastPartialText &&
+        lastPartialText.startsWith(trimmed) &&
+        trimmed.length < lastPartialText.length
+      ) {
+        return undefined;
+      }
+      return trimmed;
+    };
+
+    const updateDraftFromPartial = (text?: string) => {
+      const cleaned = text?.trim();
+      if (!cleaned) {
+        return;
+      }
+      if (cleaned === lastPartialText) {
+        return;
+      }
+      if (
+        lastPartialText &&
+        lastPartialText.startsWith(cleaned) &&
+        cleaned.length < lastPartialText.length
+      ) {
+        return;
+      }
+      lastPartialText = cleaned;
+      draftStream.update(cleaned);
+    };
+
+    const { dispatcher, replyOptions, markDispatchIdle, markRunComplete } =
       core.channel.reply.createReplyDispatcherWithTyping({
         ...prefixOptions,
         humanDelay: core.channel.reply.resolveHumanDelayConfig(cfg, route.agentId),
         typingCallbacks,
-        deliver: async (payload: ReplyPayload) => {
+        deliver: async (payload: ReplyPayload, info) => {
+          if (payload.isReasoning) {
+            return;
+          }
+          const isFinal = info.kind === "final";
+          if (isFinal) {
+            await draftStream.flush();
+            const hasMedia = Boolean(payload.mediaUrl) || (payload.mediaUrls?.length ?? 0) > 0;
+            const previewFinalText = resolvePreviewFinalText(payload.text);
+            const previewPostId = draftStream.postId();
+
+            if (
+              typeof previewPostId === "string" &&
+              !hasMedia &&
+              typeof previewFinalText === "string" &&
+              !payload.isError
+            ) {
+              try {
+                await updateMattermostPost(client, previewPostId, {
+                  message: previewFinalText,
+                });
+                finalizedViaPreviewPost = true;
+                return;
+              } catch (err) {
+                logVerboseMessage(
+                  `mattermost preview final edit failed; falling back to normal send (${String(err)})`,
+                );
+              }
+            }
+
+            if (typeof previewPostId === "string" && !finalizedViaPreviewPost) {
+              try {
+                await updateMattermostPost(client, previewPostId, {
+                  message: "↓ See below.",
+                });
+              } catch (err) {
+                logVerboseMessage(
+                  `mattermost preview completion update failed; continuing with normal send (${String(err)})`,
+                );
+              }
+            }
+          }
+
           await deliverMattermostReplyPayload({
             core,
             cfg,
@@ -1763,24 +1863,49 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         },
       });
 
-    await core.channel.reply.withReplyDispatcher({
-      dispatcher,
-      onSettled: () => {
-        markDispatchIdle();
-      },
-      run: () =>
-        core.channel.reply.dispatchReplyFromConfig({
-          ctx: ctxPayload,
-          cfg,
-          dispatcher,
-          replyOptions: {
-            ...replyOptions,
-            disableBlockStreaming:
-              typeof account.blockStreaming === "boolean" ? !account.blockStreaming : undefined,
-            onModelSelected,
-          },
-        }),
-    });
+    try {
+      await core.channel.reply.withReplyDispatcher({
+        dispatcher,
+        onSettled: () => {
+          markDispatchIdle();
+        },
+        run: () =>
+          core.channel.reply.dispatchReplyFromConfig({
+            ctx: ctxPayload,
+            cfg,
+            dispatcher,
+            replyOptions: {
+              ...replyOptions,
+              disableBlockStreaming: true,
+              onModelSelected,
+              onPartialReply: (payload) => {
+                updateDraftFromPartial(payload.text);
+              },
+              onAssistantMessageStart: () => {
+                lastPartialText = "";
+              },
+              onReasoningEnd: () => {
+                lastPartialText = "";
+              },
+              onReasoningStream: async () => {
+                if (!lastPartialText) {
+                  draftStream.update("Thinking…");
+                }
+              },
+              onToolStart: async (payload) => {
+                draftStream.update(buildMattermostToolStatusText(payload));
+              },
+            },
+          }),
+      });
+    } finally {
+      try {
+        await draftStream.stop();
+      } catch (err) {
+        logVerboseMessage(`mattermost draft preview cleanup failed: ${String(err)}`);
+      }
+      markRunComplete();
+    }
     if (historyKey) {
       clearHistoryEntriesIfEnabled({
         historyMap: channelHistories,
