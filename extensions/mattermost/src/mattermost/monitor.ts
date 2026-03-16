@@ -291,10 +291,10 @@ export function canFinalizeMattermostPreviewInPlace(params: {
 }
 
 export function shouldClearMattermostDraftPreview(params: {
-  queuedFinal: boolean;
   finalizedViaPreviewPost: boolean;
+  finalReplyDelivered: boolean;
 }): boolean {
-  return !params.queuedFinal && !params.finalizedViaPreviewPost;
+  return !params.finalReplyDelivered && !params.finalizedViaPreviewPost;
 }
 
 export function resolveMattermostEffectiveReplyToId(params: {
@@ -1769,6 +1769,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     }
     let lastPartialText = "";
     let finalizedViaPreviewPost = false;
+    let finalReplyDelivered = false;
 
     const resolvePreviewFinalText = (text?: string) => {
       if (typeof text !== "string") {
@@ -1852,6 +1853,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                   message: previewFinalText,
                 });
                 finalizedViaPreviewPost = true;
+                finalReplyDelivered = true;
                 return;
               } catch (err) {
                 logVerboseMessage(
@@ -1885,6 +1887,9 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
             tableMode,
             sendMessage: sendMessageMattermost,
           });
+          if (isFinal) {
+            finalReplyDelivered = true;
+          }
           runtime.log?.(`delivered reply to ${to}`);
         },
         onError: (err, info) => {
@@ -1893,7 +1898,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       });
 
     try {
-      const dispatchResult = await core.channel.reply.withReplyDispatcher({
+      await core.channel.reply.withReplyDispatcher({
         dispatcher,
         onSettled: () => {
           markDispatchIdle();
@@ -1931,11 +1936,13 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       });
       if (
         shouldClearMattermostDraftPreview({
-          queuedFinal: dispatchResult.queuedFinal,
           finalizedViaPreviewPost,
+          finalReplyDelivered,
         })
       ) {
-        logVerboseMessage("mattermost: clearing draft preview because no final reply was queued");
+        logVerboseMessage(
+          "mattermost: clearing draft preview because no final reply was delivered",
+        );
         await draftStream.clear();
       }
     } finally {
