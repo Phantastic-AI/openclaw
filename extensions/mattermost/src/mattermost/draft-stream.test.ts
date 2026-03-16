@@ -14,15 +14,15 @@ function createMockClient(): { client: MattermostClient; calls: RequestRecord[] 
     baseUrl: "https://chat.example.com",
     apiBaseUrl: "https://chat.example.com/api/v4",
     token: "token",
-    request: vi.fn(async (path: string, init?: RequestInit) => {
+    request: vi.fn(async <T>(path: string, init?: RequestInit): Promise<T> => {
       calls.push({ path, init });
       if (path === "/posts") {
-        return { id: `post-${nextId++}` };
+        return { id: `post-${nextId++}` } as T;
       }
       if (path.startsWith("/posts/")) {
-        return { id: "patched" };
+        return { id: "patched" } as T;
       }
-      return {};
+      return {} as T;
     }),
   };
   return { client, calls };
@@ -100,13 +100,11 @@ describe("createMattermostDraftStream", () => {
 });
 
 describe("buildMattermostToolStatusText", () => {
-  it("renders a start status when phase is absent", () => {
+  it("renders a status with the tool name", () => {
     expect(buildMattermostToolStatusText({ name: "read" })).toBe("Running `read`…");
   });
 
-  it("renders an update status when phase is update", () => {
-    expect(buildMattermostToolStatusText({ name: "exec", phase: "update" })).toBe(
-      "Running `exec`…",
-    );
+  it("falls back to a generic running tool status", () => {
+    expect(buildMattermostToolStatusText({ name: "exec" })).toBe("Running `exec`…");
   });
 });
