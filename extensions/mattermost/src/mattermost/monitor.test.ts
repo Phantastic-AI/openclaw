@@ -7,6 +7,7 @@ import {
   resolveMattermostEffectiveReplyToId,
   resolveMattermostReplyRootId,
   resolveMattermostThreadSessionContext,
+  shouldClearMattermostDraftPreview,
   type MattermostMentionGateInput,
   type MattermostRequireMentionResolverInput,
 } from "./monitor.js";
@@ -173,6 +174,26 @@ describe("canFinalizeMattermostPreviewInPlace", () => {
     expect(
       canFinalizeMattermostPreviewInPlace({
         replyToId: "child-post-789",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldClearMattermostDraftPreview", () => {
+  it("clears a stale preview when no final reply was queued", () => {
+    expect(
+      shouldClearMattermostDraftPreview({
+        queuedFinal: false,
+        finalizedViaPreviewPost: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps the preview when it already became the final reply", () => {
+    expect(
+      shouldClearMattermostDraftPreview({
+        queuedFinal: false,
+        finalizedViaPreviewPost: true,
       }),
     ).toBe(false);
   });
