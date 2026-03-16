@@ -23,7 +23,7 @@ export function normalizeMattermostDraftText(text: string, maxChars: number): st
   return `${trimmed.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
 }
 
-export function buildMattermostToolStatusText(params: { name?: string; phase?: string }): string {
+export function buildMattermostToolStatusText(params: { name?: string }): string {
   const tool = params.name?.trim() ? ` \`${params.name.trim()}\`` : " tool";
   return `Running${tool}…`;
 }
