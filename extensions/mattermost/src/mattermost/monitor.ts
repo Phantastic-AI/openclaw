@@ -1817,6 +1817,29 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       draftStream.update(cleaned);
     };
 
+    const clearDraftPreviewIfNeeded = async (reason: string, suppressErrors = false) => {
+      if (
+        !shouldClearMattermostDraftPreview({
+          finalizedViaPreviewPost,
+          finalReplyDelivered,
+        })
+      ) {
+        return;
+      }
+      logVerboseMessage(reason);
+      if (!suppressErrors) {
+        await draftStream.clear();
+        return;
+      }
+      try {
+        await draftStream.clear();
+      } catch (err) {
+        logVerboseMessage(
+          `mattermost draft preview clear failed after dispatch error: ${String(err)}`,
+        );
+      }
+    };
+
     const { dispatcher, replyOptions, markDispatchIdle, markRunComplete } =
       core.channel.reply.createReplyDispatcherWithTyping({
         ...prefixOptions,
@@ -1898,52 +1921,52 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       });
 
     try {
-      await core.channel.reply.withReplyDispatcher({
-        dispatcher,
-        onSettled: () => {
-          markDispatchIdle();
-        },
-        run: () =>
-          core.channel.reply.dispatchReplyFromConfig({
-            ctx: ctxPayload,
-            cfg,
-            dispatcher,
-            replyOptions: {
-              ...replyOptions,
-              // Draft previews require a single editable reply lane, so block
-              // streaming is intentionally disabled for this path.
-              disableBlockStreaming: true,
-              onModelSelected,
-              onPartialReply: (payload) => {
-                updateDraftFromPartial(payload.text);
+      try {
+        await core.channel.reply.withReplyDispatcher({
+          dispatcher,
+          onSettled: () => {
+            markDispatchIdle();
+          },
+          run: () =>
+            core.channel.reply.dispatchReplyFromConfig({
+              ctx: ctxPayload,
+              cfg,
+              dispatcher,
+              replyOptions: {
+                ...replyOptions,
+                // Draft previews require a single editable reply lane, so block
+                // streaming is intentionally disabled for this path.
+                disableBlockStreaming: true,
+                onModelSelected,
+                onPartialReply: (payload) => {
+                  updateDraftFromPartial(payload.text);
+                },
+                onAssistantMessageStart: () => {
+                  lastPartialText = "";
+                },
+                onReasoningEnd: () => {
+                  lastPartialText = "";
+                },
+                onReasoningStream: async () => {
+                  if (!lastPartialText) {
+                    draftStream.update("Thinking…");
+                  }
+                },
+                onToolStart: async (payload) => {
+                  draftStream.update(buildMattermostToolStatusText(payload));
+                },
               },
-              onAssistantMessageStart: () => {
-                lastPartialText = "";
-              },
-              onReasoningEnd: () => {
-                lastPartialText = "";
-              },
-              onReasoningStream: async () => {
-                if (!lastPartialText) {
-                  draftStream.update("Thinking…");
-                }
-              },
-              onToolStart: async (payload) => {
-                draftStream.update(buildMattermostToolStatusText(payload));
-              },
-            },
-          }),
-      });
-      if (
-        shouldClearMattermostDraftPreview({
-          finalizedViaPreviewPost,
-          finalReplyDelivered,
-        })
-      ) {
-        logVerboseMessage(
+            }),
+        });
+        await clearDraftPreviewIfNeeded(
           "mattermost: clearing draft preview because no final reply was delivered",
         );
-        await draftStream.clear();
+      } catch (err) {
+        await clearDraftPreviewIfNeeded(
+          "mattermost: clearing draft preview because dispatch failed before a final reply was delivered",
+          true,
+        );
+        throw err;
       }
     } finally {
       try {
