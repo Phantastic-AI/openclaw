@@ -99,6 +99,27 @@ describe("createMattermostDraftStream", () => {
     expect(stream.postId()).toBeUndefined();
   });
 
+  it("seal drops pending updates and ignores late ones", async () => {
+    const { client, calls } = createMockClient();
+    const stream = createMattermostDraftStream({
+      client,
+      channelId: "channel-1",
+      rootId: "root-1",
+      throttleMs: 1000,
+    });
+
+    stream.update("Working...");
+    await stream.flush();
+    stream.update("Stale partial");
+    await stream.seal();
+    stream.update("Late partial");
+    await stream.flush();
+    await stream.stop();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.path).toBe("/posts");
+  });
+
   it("warns and stops when preview creation fails", async () => {
     const warn = vi.fn();
     const requestImpl: MattermostClient["request"] = async () => {
