@@ -7,6 +7,7 @@ import {
   resolveMattermostEffectiveReplyToId,
   resolveMattermostReplyRootId,
   resolveMattermostThreadSessionContext,
+  shouldFinalizeMattermostPreviewAfterDispatch,
   shouldClearMattermostDraftPreview,
   type MattermostMentionGateInput,
   type MattermostRequireMentionResolverInput,
@@ -203,6 +204,35 @@ describe("shouldClearMattermostDraftPreview", () => {
       shouldClearMattermostDraftPreview({
         finalizedViaPreviewPost: true,
         finalReplyDelivered: false,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldFinalizeMattermostPreviewAfterDispatch", () => {
+  it("reuses the preview only for a single eligible final payload", () => {
+    expect(
+      shouldFinalizeMattermostPreviewAfterDispatch({
+        finalCount: 1,
+        canFinalizeInPlace: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("falls back to normal sends for multi-payload finals", () => {
+    expect(
+      shouldFinalizeMattermostPreviewAfterDispatch({
+        finalCount: 2,
+        canFinalizeInPlace: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("falls back to normal sends when the final cannot be edited into the preview", () => {
+    expect(
+      shouldFinalizeMattermostPreviewAfterDispatch({
+        finalCount: 1,
+        canFinalizeInPlace: false,
       }),
     ).toBe(false);
   });
