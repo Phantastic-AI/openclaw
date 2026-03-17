@@ -1855,6 +1855,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       if (!deferredFinalReplies.length) {
         return;
       }
+      await draftStream.seal();
       // Defer final delivery until dispatch completes so multi-payload finals
       // can fall back to normal sends instead of overwriting the same preview post.
       const pendingFinalReplies = deferredFinalReplies.splice(0);
