@@ -148,6 +148,53 @@ describe("createMattermostDraftStream", () => {
     expect(requestMock).toHaveBeenCalledTimes(1);
     expect(stream.postId()).toBeUndefined();
   });
+
+  it("does not resend after an update failure followed by stop", async () => {
+    const warn = vi.fn();
+    const calls: RequestRecord[] = [];
+    let failNextPatch = true;
+    const requestImpl: MattermostClient["request"] = async <T>(
+      path: string,
+      init?: RequestInit,
+    ): Promise<T> => {
+      calls.push({ path, init });
+      if (path === "/posts") {
+        return { id: "post-1" } as T;
+      }
+      if (path === "/posts/post-1") {
+        if (failNextPatch) {
+          failNextPatch = false;
+          throw new Error("patch failed");
+        }
+        return { id: "patched" } as T;
+      }
+      return {} as T;
+    };
+    const requestMock = vi.fn(requestImpl);
+    const client: MattermostClient = {
+      baseUrl: "https://chat.example.com",
+      apiBaseUrl: "https://chat.example.com/api/v4",
+      token: "token",
+      request: requestMock as MattermostClient["request"],
+    };
+    const stream = createMattermostDraftStream({
+      client,
+      channelId: "channel-1",
+      throttleMs: 1000,
+      warn,
+    });
+
+    stream.update("Working...");
+    await stream.flush();
+    stream.update("Will fail");
+    await stream.flush();
+    await stream.stop();
+
+    expect(warn).toHaveBeenCalledWith("mattermost stream preview failed: patch failed");
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.path).toBe("/posts");
+    expect(calls[1]?.path).toBe("/posts/post-1");
+  });
 });
 
 describe("buildMattermostToolStatusText", () => {
