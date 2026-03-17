@@ -297,6 +297,13 @@ export function shouldClearMattermostDraftPreview(params: {
   return !params.finalReplyDelivered && !params.finalizedViaPreviewPost;
 }
 
+export function shouldFinalizeMattermostPreviewAfterDispatch(params: {
+  finalCount: number;
+  canFinalizeInPlace: boolean;
+}): boolean {
+  return params.finalCount === 1 && params.canFinalizeInPlace;
+}
+
 export function resolveMattermostEffectiveReplyToId(params: {
   kind: ChatType;
   postId?: string | null;
@@ -1767,9 +1774,18 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     if (account.blockStreaming === true) {
       logVerboseMessage("mattermost: draft preview forces block streaming off for this reply path");
     }
+    type DeferredMattermostFinal = {
+      payload: ReplyPayload;
+      replyRootId?: string;
+      previewPostId?: string;
+      previewFinalText?: string;
+      canFinalizeInPlace: boolean;
+    };
     let lastPartialText = "";
     let finalizedViaPreviewPost = false;
     let finalReplyDelivered = false;
+    let previewCompletionNotePosted = false;
+    const deferredFinalReplies: DeferredMattermostFinal[] = [];
 
     const resolvePreviewFinalText = (text?: string) => {
       if (typeof text !== "string") {
@@ -1796,6 +1812,83 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         return undefined;
       }
       return trimmed;
+    };
+
+    const updateDraftPreviewToNormalSend = async (previewPostId?: string) => {
+      if (
+        previewCompletionNotePosted ||
+        finalizedViaPreviewPost ||
+        typeof previewPostId !== "string"
+      ) {
+        return;
+      }
+      try {
+        await updateMattermostPost(client, previewPostId, {
+          message: "↓ See below.",
+        });
+        previewCompletionNotePosted = true;
+      } catch (err) {
+        logVerboseMessage(
+          `mattermost preview completion update failed; continuing with normal send (${String(err)})`,
+        );
+      }
+    };
+
+    const deliverDeferredFinalReply = async (entry: DeferredMattermostFinal) => {
+      await deliverMattermostReplyPayload({
+        core,
+        cfg,
+        payload: entry.payload,
+        to,
+        accountId: account.accountId,
+        agentId: route.agentId,
+        replyToId: entry.replyRootId,
+        textLimit,
+        tableMode,
+        sendMessage: sendMessageMattermost,
+      });
+      finalReplyDelivered = true;
+      runtime.log?.(`delivered reply to ${to}`);
+    };
+
+    const finalizeOrDeliverDeferredFinalReplies = async (finalCount: number) => {
+      if (!deferredFinalReplies.length) {
+        return;
+      }
+      // Defer final delivery until dispatch completes so multi-payload finals
+      // can fall back to normal sends instead of overwriting the same preview post.
+      const pendingFinalReplies = deferredFinalReplies.splice(0);
+      const firstFinal = pendingFinalReplies[0];
+      if (
+        firstFinal &&
+        shouldFinalizeMattermostPreviewAfterDispatch({
+          finalCount,
+          canFinalizeInPlace: firstFinal.canFinalizeInPlace,
+        }) &&
+        typeof firstFinal.previewPostId === "string" &&
+        typeof firstFinal.previewFinalText === "string"
+      ) {
+        try {
+          await updateMattermostPost(client, firstFinal.previewPostId, {
+            message: firstFinal.previewFinalText,
+          });
+          finalizedViaPreviewPost = true;
+          finalReplyDelivered = true;
+          return;
+        } catch (err) {
+          logVerboseMessage(
+            `mattermost preview final edit failed; falling back to normal send (${String(err)})`,
+          );
+        }
+      }
+
+      const previewPostId = pendingFinalReplies.find(
+        (entry) => typeof entry.previewPostId === "string",
+      )?.previewPostId;
+      await updateDraftPreviewToNormalSend(previewPostId);
+      for (const entry of pendingFinalReplies) {
+        await deliverDeferredFinalReply(entry);
+      }
     };
 
     const updateDraftFromPartial = (text?: string) => {
@@ -1859,43 +1952,23 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
             const hasMedia = Boolean(payload.mediaUrl) || (payload.mediaUrls?.length ?? 0) > 0;
             const previewFinalText = resolvePreviewFinalText(payload.text);
             const previewPostId = draftStream.postId();
-
-            if (
-              typeof previewPostId === "string" &&
-              !hasMedia &&
-              typeof previewFinalText === "string" &&
-              canFinalizeMattermostPreviewInPlace({
-                previewRootId: effectiveReplyToId,
-                threadRootId: effectiveReplyToId,
-                replyToId: payload.replyToId,
-              }) &&
-              !payload.isError
-            ) {
-              try {
-                await updateMattermostPost(client, previewPostId, {
-                  message: previewFinalText,
-                });
-                finalizedViaPreviewPost = true;
-                finalReplyDelivered = true;
-                return;
-              } catch (err) {
-                logVerboseMessage(
-                  `mattermost preview final edit failed; falling back to normal send (${String(err)})`,
-                );
-              }
-            }
-
-            if (typeof previewPostId === "string" && !finalizedViaPreviewPost) {
-              try {
-                await updateMattermostPost(client, previewPostId, {
-                  message: "↓ See below.",
-                });
-              } catch (err) {
-                logVerboseMessage(
-                  `mattermost preview completion update failed; continuing with normal send (${String(err)})`,
-                );
-              }
-            }
+            deferredFinalReplies.push({
+              payload,
+              replyRootId: finalReplyRootId,
+              previewPostId,
+              previewFinalText,
+              canFinalizeInPlace:
+                typeof previewPostId === "string" &&
+                !hasMedia &&
+                typeof previewFinalText === "string" &&
+                canFinalizeMattermostPreviewInPlace({
+                  previewRootId: effectiveReplyToId,
+                  threadRootId: effectiveReplyToId,
+                  replyToId: payload.replyToId,
+                }) &&
+                !payload.isError,
+            });
+            return;
           }
 
           await deliverMattermostReplyPayload({
@@ -1922,7 +1995,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
 
     try {
       try {
-        await core.channel.reply.withReplyDispatcher({
+        const dispatchResult = await core.channel.reply.withReplyDispatcher({
           dispatcher,
           onSettled: () => {
             markDispatchIdle();
@@ -1958,6 +2031,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
               },
             }),
         });
+        await finalizeOrDeliverDeferredFinalReplies(dispatchResult.counts.final);
         await clearDraftPreviewIfNeeded(
           "mattermost: clearing draft preview because no final reply was delivered",
         );
