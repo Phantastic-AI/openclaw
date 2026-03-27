@@ -12,7 +12,7 @@ vi.mock("./manifest-registry.js", () => ({
 }));
 
 let resolveOwningPluginIdsForProvider: typeof import("./providers.js").resolveOwningPluginIdsForProvider;
-let resolvePluginProviders: typeof import("./providers.js").resolvePluginProviders;
+let resolvePluginProviders: typeof import("./providers.runtime.js").resolvePluginProviders;
 
 describe("resolvePluginProviders", () => {
   beforeEach(async () => {
@@ -32,8 +32,8 @@ describe("resolvePluginProviders", () => {
       ],
       diagnostics: [],
     });
-    ({ resolveOwningPluginIdsForProvider, resolvePluginProviders } =
-      await import("./providers.js"));
+    ({ resolveOwningPluginIdsForProvider } = await import("./providers.js"));
+    ({ resolvePluginProviders } = await import("./providers.runtime.js"));
   });
 
   it("forwards an explicit env to plugin loading", () => {
@@ -104,6 +104,30 @@ describe("resolvePluginProviders", () => {
         activate: false,
       }),
     );
+  });
+
+  it("does not leak host Vitest env into an explicit non-Vitest env", () => {
+    const previousVitest = process.env.VITEST;
+    process.env.VITEST = "1";
+    try {
+      resolvePluginProviders({
+        env: {} as NodeJS.ProcessEnv,
+        bundledProviderVitestCompat: true,
+      });
+
+      expect(loadOpenClawPluginsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: undefined,
+          env: {},
+        }),
+      );
+    } finally {
+      if (previousVitest === undefined) {
+        delete process.env.VITEST;
+      } else {
+        process.env.VITEST = previousVitest;
+      }
+    }
   });
 
   it("does not reintroduce the retired google auth plugin id into compat allowlists", () => {

@@ -1,3 +1,4 @@
+import { describeAccountSnapshot } from "openclaw/plugin-sdk/account-helpers";
 import { formatAllowFromLowercase } from "openclaw/plugin-sdk/allow-from";
 import {
   adaptScopedAccountAccessor,
@@ -16,14 +17,9 @@ import {
   resolveSlackAccount,
   type ResolvedSlackAccount,
 } from "./accounts.js";
+import { SlackChannelConfigSchema } from "./config-schema.js";
 import { isSlackInteractiveRepliesEnabled } from "./interactive-replies.js";
-import {
-  buildChannelConfigSchema,
-  getChatChannelMeta,
-  SlackConfigSchema,
-  type ChannelPlugin,
-  type OpenClawConfig,
-} from "./runtime-api.js";
+import { getChatChannelMeta, type ChannelPlugin, type OpenClawConfig } from "./runtime-api.js";
 
 export const SLACK_CHANNEL = "slack" as const;
 
@@ -191,6 +187,7 @@ export function createSlackPluginBase(params: {
       messageToolHints: ({ cfg, accountId }) =>
         isSlackInteractiveRepliesEnabled({ cfg, accountId })
           ? [
+              "- Prefer Slack buttons/selects for 2-5 discrete choices or parameter picks instead of asking the user to type one.",
               "- Slack interactive replies: use `[[slack_buttons: Label:value, Other:other]]` to add action buttons that route clicks back as Slack interaction system events.",
               "- Slack selects: use `[[slack_select: Placeholder | Label:value, Other:other]]` to add a static select menu that routes the chosen value back as a Slack interaction system event.",
             ]
@@ -202,18 +199,19 @@ export function createSlackPluginBase(params: {
       blockStreamingCoalesceDefaults: { minChars: 1500, idleMs: 1000 },
     },
     reload: { configPrefixes: ["channels.slack"] },
-    configSchema: buildChannelConfigSchema(SlackConfigSchema),
+    configSchema: SlackChannelConfigSchema,
     config: {
       ...slackConfigAdapter,
       isConfigured: (account) => isSlackPluginAccountConfigured(account),
-      describeAccount: (account) => ({
-        accountId: account.accountId,
-        name: account.name,
-        enabled: account.enabled,
-        configured: isSlackPluginAccountConfigured(account),
-        botTokenSource: account.botTokenSource,
-        appTokenSource: account.appTokenSource,
-      }),
+      describeAccount: (account) =>
+        describeAccountSnapshot({
+          account,
+          configured: isSlackPluginAccountConfigured(account),
+          extra: {
+            botTokenSource: account.botTokenSource,
+            appTokenSource: account.appTokenSource,
+          },
+        }),
     },
     setup: params.setup,
   }) as Pick<

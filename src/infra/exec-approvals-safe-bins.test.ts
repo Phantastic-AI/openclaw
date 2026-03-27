@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { makePathEnv, makeTempDir } from "./exec-approvals-test-helpers.js";
+import {
+  makeMockCommandResolution,
+  makeMockExecutableResolution,
+  makePathEnv,
+  makeTempDir,
+} from "./exec-approvals-test-helpers.js";
 import {
   evaluateExecAllowlist,
   evaluateShellAllowlist,
@@ -177,6 +182,18 @@ describe("exec approvals safe bins", () => {
     {
       name: "blocks jq env builtin even when jq is explicitly opted in",
       argv: ["jq", "env"],
+      resolvedPath: "/usr/bin/jq",
+      expected: false,
+    },
+    {
+      name: "blocks jq $ENV builtin variable even when jq is explicitly opted in",
+      argv: ["jq", "$ENV"],
+      resolvedPath: "/usr/bin/jq",
+      expected: false,
+    },
+    {
+      name: "blocks jq $ENV property access even when jq is explicitly opted in",
+      argv: ["jq", "($ENV).OPENAI_API_KEY"],
       resolvedPath: "/usr/bin/jq",
       expected: false,
     },
@@ -428,11 +445,13 @@ describe("exec approvals safe bins", () => {
         {
           raw: "jq .foo",
           argv: ["jq", ".foo"],
-          resolution: {
-            rawExecutable: "jq",
-            resolvedPath: "/custom/bin/jq",
-            executableName: "jq",
-          },
+          resolution: makeMockCommandResolution({
+            execution: makeMockExecutableResolution({
+              rawExecutable: "jq",
+              resolvedPath: "/custom/bin/jq",
+              executableName: "jq",
+            }),
+          }),
         },
       ],
     };
@@ -476,7 +495,7 @@ describe("exec approvals safe bins", () => {
     expect(result.analysisOk).toBe(true);
     expect(result.allowlistSatisfied).toBe(false);
     expect(result.segmentSatisfiedBy).toEqual([null]);
-    expect(result.segments[0]?.resolution?.resolvedPath).toBe(fakeHead);
+    expect(result.segments[0]?.resolution?.execution.resolvedPath).toBe(fakeHead);
   });
 
   it("fails closed for semantic env wrappers in allowlist mode", () => {

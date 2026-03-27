@@ -82,13 +82,12 @@ Hooks run inside the Gateway process. Treat bundled hooks, managed hooks, and `h
 
 ## Hook Discovery
 
-Hooks are automatically discovered from these directories:
+Hooks are automatically discovered from these directories, in order of increasing override precedence:
 
-1. **Bundled hooks**: `<openclaw>/dist/hooks/bundled/` (shipped with OpenClaw)
+1. **Bundled hooks**: shipped with OpenClaw; located at `<openclaw>/dist/hooks/bundled/` for npm installs (or a sibling `hooks/bundled/` for compiled binaries)
 2. **Plugin hooks**: hooks bundled inside installed plugins (see [Plugin hooks](/plugins/architecture#provider-runtime-hooks))
-3. **Managed hooks**: `~/.openclaw/hooks/` (user-installed, shared across workspaces; can override bundled and plugin hooks)
-4. **Extra hook directories**: `hooks.internal.load.extraDirs` (operator-configured shared hook folders; treated as managed)
-5. **Workspace hooks**: `<workspace>/hooks/` (per-agent, disabled by default until explicitly enabled; cannot override hooks from other sources)
+3. **Managed hooks**: `~/.openclaw/hooks/` (user-installed, shared across workspaces; can override bundled and plugin hooks). **Extra hook directories** configured via `hooks.internal.load.extraDirs` are also treated as managed hooks and share the same override precedence.
+4. **Workspace hooks**: `<workspace>/hooks/` (per-agent, disabled by default until explicitly enabled; cannot override hooks from other sources)
 
 Workspace hooks can add new hook names for a repo, but they cannot override bundled, managed, or plugin-provided hooks with the same name.
 
@@ -181,12 +180,12 @@ The `metadata.openclaw` object supports:
 - **`events`**: Array of events to listen for (e.g., `["command:new", "command:reset"]`)
 - **`export`**: Named export to use (defaults to `"default"`)
 - **`homepage`**: Documentation URL
+- **`os`**: Required platforms (e.g., `["darwin", "linux"]`)
 - **`requires`**: Optional requirements
   - **`bins`**: Required binaries on PATH (e.g., `["git", "node"]`)
   - **`anyBins`**: At least one of these binaries must be present
   - **`env`**: Required environment variables
   - **`config`**: Required config paths (e.g., `["workspace.dir"]`)
-  - **`os`**: Required platforms (e.g., `["darwin", "linux"]`)
 - **`always`**: Bypass eligibility checks (boolean)
 - **`install`**: Installation methods (for bundled hooks: `[{"id":"bundled","kind":"bundled"}]`)
 
@@ -226,15 +225,17 @@ Each event includes:
   timestamp: Date,             // When the event occurred
   messages: string[],          // Push messages here to send to user
   context: {
-    // Command events:
-    sessionEntry?: SessionEntry,
-    sessionId?: string,
-    sessionFile?: string,
-    commandSource?: string,    // e.g., 'whatsapp', 'telegram'
+    // Command events (command:new, command:reset):
+    sessionEntry?: SessionEntry,       // current session entry
+    previousSessionEntry?: SessionEntry, // pre-reset entry (preferred for session-memory)
+    commandSource?: string,            // e.g., 'whatsapp', 'telegram'
     senderId?: string,
     workspaceDir?: string,
-    bootstrapFiles?: WorkspaceBootstrapFile[],
     cfg?: OpenClawConfig,
+    // Command events (command:stop only):
+    sessionId?: string,
+    // Agent bootstrap events (agent:bootstrap):
+    bootstrapFiles?: WorkspaceBootstrapFile[],
     // Message events (see Message Events section for full details):
     from?: string,             // message:received
     to?: string,               // message:sent
@@ -273,6 +274,68 @@ Specific handler registration uses the literal key format `${type}:${action}`. F
 Triggered when the gateway starts:
 
 - **`gateway:startup`**: After channels start and hooks are loaded
+
+### Session Patch Events
+
+Triggered when session properties are modified:
+
+- **`session:patch`**: When a session is updated
+
+#### Session Event Context
+
+Session events include rich context about the session and changes:
+
+```typescript
+{
+  sessionEntry: SessionEntry, // The complete updated session entry
+  patch: {                    // The patch object (only changed fields)
+    // Session identity & labeling
+    label?: string | null,           // Human-readable session label
+
+    // AI model configuration
+    model?: string | null,           // Model override (e.g., "claude-opus-4-5")
+    thinkingLevel?: string | null,   // Thinking level ("off"|"low"|"med"|"high")
+    verboseLevel?: string | null,    // Verbose output level
+    reasoningLevel?: string | null,  // Reasoning mode override
+    elevatedLevel?: string | null,   // Elevated mode override
+    responseUsage?: "off" | "tokens" | "full" | null, // Usage display mode
+
+    // Tool execution settings
+    execHost?: string | null,        // Exec host (sandbox|gateway|node)
+    execSecurity?: string | null,    // Security mode (deny|allowlist|full)
+    execAsk?: string | null,         // Approval mode (off|on-miss|always)
+    execNode?: string | null,        // Node ID for host=node
+
+    // Subagent coordination
+    spawnedBy?: string | null,       // Parent session key (for subagents)
+    spawnDepth?: number | null,      // Nesting depth (0 = root)
+
+    // Communication policies
+    sendPolicy?: "allow" | "deny" | null,          // Message send policy
+    groupActivation?: "mention" | "always" | null, // Group chat activation
+  },
+  cfg: OpenClawConfig            // Current gateway config
+}
+```
+
+**Security note:** Only privileged clients (including the Control UI) can trigger `session:patch` events. Standard WebChat clients are blocked from patching sessions (see PR #20800), so the hook will not fire from those connections.
+
+See `SessionsPatchParamsSchema` in `src/gateway/protocol/schema/sessions.ts` for the complete type definition.
+
+#### Example: Session Patch Logger Hook
+
+```typescript
+const handler = async (event) => {
+  if (event.type !== "session" || event.action !== "patch") {
+    return;
+  }
+  const { patch } = event.context;
+  console.log(`[session-patch] Session updated: ${event.sessionKey}`);
+  console.log(`[session-patch] Changes:`, patch);
+};
+
+export default handler;
+```
 
 ### Message Events
 
@@ -396,6 +459,44 @@ These hooks are not event-stream listeners; they let plugins synchronously adjus
 
 ### Plugin Hook Events
 
+#### before_tool_call
+
+Runs before each tool call. Plugins can modify parameters, block the call, or request user approval.
+
+Return fields:
+
+- **`params`**: Override tool parameters (merged with original params)
+- **`block`**: Set to `true` to block the tool call
+- **`blockReason`**: Reason shown to the agent when blocked
+- **`requireApproval`**: Pause execution and wait for user approval via channels
+
+The `requireApproval` field triggers native platform approval (Telegram buttons, Discord components, `/approve` command) instead of relying on the agent to cooperate:
+
+```typescript
+{
+  requireApproval: {
+    title: "Sensitive operation",
+    description: "This tool call modifies production data",
+    severity: "warning",       // "info" | "warning" | "critical"
+    timeoutMs: 120000,         // default: 120s
+    timeoutBehavior: "deny",   // "allow" | "deny" (default)
+    onResolution: async (decision) => {
+      // Called after the user resolves: "allow-once", "allow-always", "deny", "timeout", or "cancelled"
+    },
+  }
+}
+```
+
+The `onResolution` callback is invoked with the final decision string after the approval resolves, times out, or is cancelled. It runs in-process within the plugin (not sent to the gateway). Use it to persist decisions, update caches, or perform cleanup.
+
+The `pluginId` field is stamped automatically by the hook runner from the plugin registration. When multiple plugins return `requireApproval`, the first one (highest priority) wins.
+
+`block` takes precedence over `requireApproval`: if the merged hook result has both `block: true` and a `requireApproval` field, the tool call is blocked immediately without triggering the approval flow. This ensures a higher-priority plugin's block cannot be overridden by a lower-priority plugin's approval request.
+
+If the gateway is unavailable or does not support plugin approvals, the tool call falls back to a soft block using the `description` as the block reason.
+
+#### Compaction lifecycle
+
 Compaction lifecycle hooks exposed through the plugin hook runner:
 
 - **`before_compaction`**: Runs before compaction with count/token metadata
@@ -509,7 +610,7 @@ Hooks can have custom configuration:
 
 ### Extra Directories
 
-Load hooks from additional directories:
+Load hooks from additional directories (treated as managed hooks, same override precedence):
 
 ```json
 {
@@ -670,6 +771,12 @@ Injects additional bootstrap files (for example monorepo-local `AGENTS.md` / `TO
   }
 }
 ```
+
+**Config options**:
+
+- `paths` (string[]): glob/path patterns to resolve from the workspace.
+- `patterns` (string[]): alias of `paths`.
+- `files` (string[]): alias of `paths`.
 
 **Notes**:
 
@@ -909,9 +1016,11 @@ test("my handler works", async () => {
 ```
 Gateway startup
     ↓
-Scan directories (workspace → managed → bundled)
+Scan directories (bundled → plugin → managed + extra dirs → workspace)
     ↓
 Parse HOOK.md files
+    ↓
+Sort by override precedence (bundled < plugin < managed < workspace)
     ↓
 Check eligibility (bins, env, config, os)
     ↓

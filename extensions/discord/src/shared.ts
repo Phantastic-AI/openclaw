@@ -1,3 +1,4 @@
+import { describeAccountSnapshot } from "openclaw/plugin-sdk/account-helpers";
 import { formatAllowFromLowercase } from "openclaw/plugin-sdk/allow-from";
 import { adaptScopedAccountAccessor } from "openclaw/plugin-sdk/channel-config-helpers";
 import { createChannelPluginBase } from "openclaw/plugin-sdk/core";
@@ -8,10 +9,9 @@ import {
   resolveDiscordAccount,
   type ResolvedDiscordAccount,
 } from "./accounts.js";
+import { DiscordChannelConfigSchema } from "./config-schema.js";
 import {
   createScopedChannelConfigAdapter,
-  buildChannelConfigSchema,
-  DiscordConfigSchema,
   getChatChannelMeta,
   type ChannelPlugin,
 } from "./runtime-api.js";
@@ -69,17 +69,18 @@ export function createDiscordPluginBase(params: {
       blockStreamingCoalesceDefaults: { minChars: 1500, idleMs: 1000 },
     },
     reload: { configPrefixes: ["channels.discord"] },
-    configSchema: buildChannelConfigSchema(DiscordConfigSchema),
+    configSchema: DiscordChannelConfigSchema,
     config: {
       ...discordConfigAdapter,
       isConfigured: (account) => Boolean(account.token?.trim()),
-      describeAccount: (account) => ({
-        accountId: account.accountId,
-        name: account.name,
-        enabled: account.enabled,
-        configured: Boolean(account.token?.trim()),
-        tokenSource: account.tokenSource,
-      }),
+      describeAccount: (account) =>
+        describeAccountSnapshot({
+          account,
+          configured: Boolean(account.token?.trim()),
+          extra: {
+            tokenSource: account.tokenSource,
+          },
+        }),
     },
     setup: params.setup,
   }) as Pick<

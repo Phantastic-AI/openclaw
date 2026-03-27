@@ -164,6 +164,13 @@ export default definePluginEntry({
         }
 
         if (action === "set") {
+          // Persistent config writes require operator.admin on every channel.
+          // Without this check, external channel senders could bypass the
+          // admin-only config.patch RPC by reaching writeConfigFile indirectly.
+          if (!ctx.gatewayClientScopes?.includes("operator.admin")) {
+            return { text: `⚠️ ${commandLabel} set requires operator.admin.` };
+          }
+
           const query = tokens.slice(1).join(" ").trim();
           if (!query) {
             return { text: `Usage: ${commandLabel} set <voiceId|name>` };
