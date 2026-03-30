@@ -60,7 +60,9 @@ socat \
   TCP:127.0.0.1:"${CHROME_CDP_PORT}" &
 
 if [[ "${ENABLE_NOVNC}" == "1" && "${HEADLESS}" != "1" ]]; then
-  x11vnc -display :1 -rfbport "${VNC_PORT}" -shared -forever -nopw -localhost &
+  # Docker already publishes the host-facing port on 127.0.0.1 only, so keep
+  # x11vnc reachable on the container interface for host-local raw VNC tunnels.
+  x11vnc -display :1 -rfbport "${VNC_PORT}" -shared -forever -nopw &
   websockify --web /usr/share/novnc/ "${NOVNC_PORT}" "localhost:${VNC_PORT}" &
 fi
 
