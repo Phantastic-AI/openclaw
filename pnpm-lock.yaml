@@ -1506,6 +1506,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  extensions/you: {}
+
   extensions/zai:
     devDependencies:
       '@openclaw/plugin-sdk':
